@@ -44,8 +44,10 @@ Apple Silicon 上的 Parallels 只能虚拟化 **ARM64** 客户机，而 Arch Li
 │   ├── serve.py              # 宿主机 HTTP 服务：分发脚本 + 接收安装日志
 │   ├── reset-password.sh     # 忘记密码时用 live 环境 chroot 重置（需自行提供新密码）
 │   ├── check.sh              # 环境自检脚本（宿主机侧一键体检）
+│   ├── proxy-forward.py      # 端口转发：让虚拟机复用宿主机的本地代理
 │   └── sshkey.pub            # （本地生成，已被 .gitignore 排除）
 ├── 使用教程.md                              # 完整操作手册（逐步说明 / 功能演示 / 场景 / FAQ）
+├── 虚拟机网络配置.md                         # 虚拟机访问被宿主机屏蔽站点的排查与解法
 ├── Arch-Linux-ARM-Parallels-安装指南.md     # 手工安装指引（含 archinstall 向导逐步说明）
 ├── 环境配置与验证清单.md                     # 依赖清单、环境变量、构建调试、验证步骤
 └── .gitignore
@@ -461,6 +463,7 @@ Archboot 镜像**每日更新**，`install.sh` 中的 ISO 文件名与校验值�
 | 文档 | 内容 |
 | --- | --- |
 | **[使用教程.md](使用教程.md)** | 完整操作手册：逐步说明、功能演示、场景示例、12 个 FAQ、注意事项 |
+| **[虚拟机网络配置.md](虚拟机网络配置.md)** | 虚拟机访问被宿主机屏蔽站点的排查与解法（含容器 / WSL 通用性说明） |
 | **[Arch-Linux-ARM-Parallels-安装指南.md](Arch-Linux-ARM-Parallels-安装指南.md)** | 手工安装指引，含 `archinstall` 向导逐步说明 |
 | **[环境配置与验证清单.md](环境配置与验证清单.md)** | 依赖清单、运行时要求、环境变量、构建调试、验证步骤 |
 
