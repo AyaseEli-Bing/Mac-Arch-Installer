@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-22
+
+### 修复
+
+- `release.sh`：移除对未定义变量 `$FAIL` 的引用。此前发版流程虽能正常完成，
+  但结束时会输出 `[: : integer expression expected`。
+
 ## [1.2.0] - 2026-09-22
 
 本次为功能扩展版本：让工具从"一次性脚本"变成可配置、可维护的项目。
@@ -85,7 +92,8 @@
   直接使用 Arch 官方 ISO 即可，无需本项目。
 - Parallels Tools 官方不支持 Arch，属社区级支持。
 
-[Unreleased]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/releases/tag/v1.0.0
