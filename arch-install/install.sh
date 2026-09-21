@@ -3,7 +3,46 @@
 # Arch Linux ARM 自动安装脚本
 # 目标：Parallels Desktop on Apple Silicon (ARM64 / UEFI)
 # 用法：在 Archboot live 环境的 root shell 中执行本脚本
+#
+# 配置来源（后者覆盖前者）：
+#   1. 本脚本内的默认值
+#   2. /root/install.conf（若存在）—— 模板见 install.conf.example
 # ============================================================
+
+# ---------- 默认配置 ----------
+NEW_HOSTNAME="arch-vm"          # 主机名
+NEW_TIMEZONE="Asia/Shanghai"    # 时区
+NEW_LOCALE="zh_CN.UTF-8"        # 系统语言
+NEW_KEYMAP="us"                 # 键盘布局
+NEW_USER="arch"                 # 普通用户名
+NEW_USER_PW="arch"              # 普通用户密码（⚠️ 安装后请立即修改）
+NEW_ROOT_PW="arch"              # root 密码（⚠️ 安装后请立即修改）
+NEW_DESKTOP="kde"               # 桌面环境: kde | gnome | xfce | none
+NEW_KERNEL="linux-aarch64"      # 内核包（ARM64 必须用 linux-aarch64）
+NEW_DISK=""                     # 目标磁盘，留空 = 自动检测容量最大的磁盘
+NEW_CJK="yes"                   # 安装中文字体与输入法: yes | no
+NEW_MIRROR_CN="yes"             # 优先使用国内镜像: yes | no
+NEW_EXTRA_PKGS=""               # 额外软件包（空格分隔）
+
+# ---------- 加载外部配置 ----------
+for _conf in /root/install.conf /etc/install.conf; do
+    if [ -f "$_conf" ]; then
+        # shellcheck source=/dev/null
+        if . "$_conf"; then
+            echo "[arch] config loaded: $_conf"
+            break
+        fi
+    fi
+done
+
+# 桌面环境 → 显示管理器映射
+case "$NEW_DESKTOP" in
+    kde)   DM="sddm"    ;;
+    gnome) DM="gdm"     ;;
+    xfce)  DM="lightdm" ;;
+    none)  DM=""        ;;
+    *)     DM=""        ;;
+esac
 
 # 自动探测宿主机在 Parallels 虚拟网段中的地址（Shared / Host-Only 任一）
 HOST_IP=""
@@ -41,12 +80,18 @@ r "[0] UEFI OK"
 timedatectl set-ntp true >/dev/null 2>&1
 r "[1] ntp synced: $(date '+%F %T')"
 
-# ---------- 2. 自动识别目标磁盘 ----------
-# 排除光驱(rom)与分区(part)，取容量最大的磁盘
-DISK=$(lsblk -ndo NAME,SIZE,TYPE 2>/dev/null | awk '$3=="disk"' | sort -k2 -h | tail -1 | awk '{print "/dev/"$1}')
-r "[2] target disk = $DISK  ($(lsblk -ndo SIZE "$DISK" 2>/dev/null))"
+# ---------- 2. 确定目标磁盘 ----------
+if [ -n "$NEW_DISK" ] && [ -b "$NEW_DISK" ]; then
+    DISK="$NEW_DISK"
+    r "[2] target disk = $DISK  ($(lsblk -ndo SIZE "$DISK" 2>/dev/null)) [from install.conf]"
+else
+    [ -n "$NEW_DISK" ] && r "[2][WARN] 配置的磁盘 $NEW_DISK 不存在，回退到自动检测"
+    # 排除光驱(rom)与分区(part)，取容量最大的磁盘
+    DISK=$(lsblk -ndo NAME,SIZE,TYPE 2>/dev/null | awk '$3=="disk"' | sort -k2 -h | tail -1 | awk '{print "/dev/"$1}')
+    r "[2] target disk = $DISK  ($(lsblk -ndo SIZE "$DISK" 2>/dev/null)) [auto-detected]"
+fi
 if [ -z "$DISK" ] || [ ! -b "$DISK" ]; then
-    r "[FATAL] cannot detect target disk, abort"
+    r "[2][FATAL] cannot detect target disk, abort"
     exit 1
 fi
 
@@ -110,9 +155,11 @@ command -v partprobe >/dev/null 2>&1 && partprobe "$DISK" >/dev/null 2>&1
 command -v partx >/dev/null 2>&1 && partx -u "$DISK" >/dev/null 2>&1
 command -v blockdev >/dev/null 2>&1 && blockdev --rereadpt "$DISK" >/dev/null 2>&1
 
-# 等待分区设备节点出现
-for i in 1 2 3 4 5 6 7 8 9 10; do
-    [ -b "$EFI_PART" ] && [ -b "$ROOT_PART" ] && break
+# 等待分区设备节点出现（最多 10 秒）
+for _ in $(seq 1 10); do
+    if [ -b "$EFI_PART" ] && [ -b "$ROOT_PART" ]; then
+        break
+    fi
     sleep 1
 done
 
@@ -150,14 +197,21 @@ if [ "${MNT_MB:-0}" -lt 10000 ]; then
     exit 1
 fi
 
-# ---------- 6. 配置镜像源（清华 Arch Linux ARM 镜像优先） ----------
-cat > /etc/pacman.d/mirrorlist <<'MIRROR'
+# ---------- 6. 配置镜像源 ----------
+mkdir -p /mnt/etc/pacman.d
+if [ "$NEW_MIRROR_CN" = "yes" ]; then
+    cat > /etc/pacman.d/mirrorlist <<'MIRROR'
 Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo
 Server = https://mirrors.ustc.edu.cn/archlinuxarm/$arch/$repo
 Server = http://mirror.archlinuxarm.org/$arch/$repo
 MIRROR
-cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist 2>/dev/null
-mkdir -p /mnt/etc/pacman.d
+    r "[6] mirrorlist: 国内镜像优先（清华 / USTC）"
+else
+    cat > /etc/pacman.d/mirrorlist <<'MIRROR'
+Server = http://mirror.archlinuxarm.org/$arch/$repo
+MIRROR
+    r "[6] mirrorlist: 官方源"
+fi
 cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
 r "[6] mirrorlist configured"
 
@@ -166,14 +220,47 @@ pacman-key --init >/dev/null 2>&1
 pacman-key --populate archlinuxarm >/dev/null 2>&1
 r "[7] pacman keyring ready"
 
-# ---------- 8. 安装基础系统 + 桌面 ----------
+# ---------- 8. 组装软件包列表并安装 ----------
+PKGS="base base-devel $NEW_KERNEL linux-firmware"
+PKGS="$PKGS networkmanager sudo vim nano curl bash-completion man-db man-pages texinfo"
+
+# 中文支持
+if [ "$NEW_CJK" = "yes" ]; then
+    PKGS="$PKGS noto-fonts-cjk noto-fonts-emoji fcitx5 fcitx5-chinese-addons fcitx5-configtool"
+    r "[8] 中文支持: 已启用（字体 + fcitx5 输入法）"
+fi
+
+# 桌面环境
+case "$NEW_DESKTOP" in
+    kde)
+        PKGS="$PKGS plasma-meta sddm konsole dolphin kate"
+        r "[8] 桌面环境: KDE Plasma（显示管理器 sddm）"
+        ;;
+    gnome)
+        PKGS="$PKGS gnome gnome-extra gdm"
+        r "[8] 桌面环境: GNOME（显示管理器 gdm）"
+        ;;
+    xfce)
+        PKGS="$PKGS xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"
+        r "[8] 桌面环境: XFCE（显示管理器 lightdm）"
+        ;;
+    none)
+        r "[8] 桌面环境: 无（纯命令行）"
+        ;;
+    *)
+        r "[8][WARN] 未知桌面环境 '$NEW_DESKTOP'，按纯命令行处理"
+        ;;
+esac
+
+# 额外软件包
+if [ -n "$NEW_EXTRA_PKGS" ]; then
+    PKGS="$PKGS $NEW_EXTRA_PKGS"
+    r "[8] 额外软件包: $NEW_EXTRA_PKGS"
+fi
+
 r "[8] pacstrap START (this takes a while)"
-pacstrap /mnt base base-devel linux-aarch64 linux-firmware \
-    networkmanager sudo vim nano curl bash-completion \
-    plasma-meta sddm konsole dolphin kate \
-    noto-fonts-cjk noto-fonts-emoji \
-    fcitx5 fcitx5-chinese-addons fcitx5-configtool \
-    man-db man-pages texinfo 2>&1 | tee /tmp/pacstrap.log
+# shellcheck disable=SC2086
+pacstrap /mnt $PKGS 2>&1 | tee /tmp/pacstrap.log
 PS_RC=${PIPESTATUS[0]}
 r "[8] pacstrap END rc=$PS_RC  size=$(du -sh /mnt 2>/dev/null | awk '{print $1}')"
 if [ $PS_RC -ne 0 ]; then
@@ -191,59 +278,90 @@ genfstab -U /mnt >> /mnt/etc/fstab
 r "[9] fstab generated: $(grep -c UUID /mnt/etc/fstab) entries"
 
 # ---------- 10. 写入 chroot 配置脚本 ----------
+# 配置值必须显式传给 chroot（chroot 后无法继承父 shell 的变量）
+cat > /mnt/root/.install-vars <<VARS
+NEW_HOSTNAME='$NEW_HOSTNAME'
+NEW_TIMEZONE='$NEW_TIMEZONE'
+NEW_LOCALE='$NEW_LOCALE'
+NEW_KEYMAP='$NEW_KEYMAP'
+NEW_USER='$NEW_USER'
+NEW_USER_PW='$NEW_USER_PW'
+NEW_ROOT_PW='$NEW_ROOT_PW'
+NEW_DESKTOP='$NEW_DESKTOP'
+DM='$DM'
+NEW_CJK='$NEW_CJK'
+NEW_MIRROR_CN='$NEW_MIRROR_CN'
+VARS
+chmod 600 /mnt/root/.install-vars
+
 cat > /mnt/root/config.sh <<'CHROOT'
 #!/bin/bash
 set -o pipefail
 HOST_URL=$(cat /root/.host_url 2>/dev/null || echo "http://10.211.55.2:8000")
 r() { echo "[arch] $1"; curl -s -m 10 -X POST -d "$1" "$HOST_URL/log" >/dev/null 2>&1; }
 
-# 时区
-ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-hwclock --systohc 2>/dev/null
-r "[10] timezone=Asia/Shanghai"
+# 加载安装配置
+# shellcheck source=/dev/null
+. /root/.install-vars
 
-# 本地化
-sed -i 's/^#zh_CN.UTF-8/zh_CN.UTF-8/' /etc/locale.gen
+# ---------- 时区 ----------
+ln -sf "/usr/share/zoneinfo/$NEW_TIMEZONE" /etc/localtime
+hwclock --systohc 2>/dev/null
+r "[10] timezone=$NEW_TIMEZONE"
+
+# ---------- 本地化 ----------
+LOC_BASE=${NEW_LOCALE%%.*}
+sed -i "s/^#\(${LOC_BASE}\.UTF-8\)/\1/" /etc/locale.gen
 sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
 locale-gen >/dev/null 2>&1
-echo "LANG=zh_CN.UTF-8" > /etc/locale.conf
-echo "KEYMAP=us" > /etc/vconsole.conf
-r "[10] locale generated (zh_CN.UTF-8)"
+echo "LANG=$NEW_LOCALE" > /etc/locale.conf
+echo "KEYMAP=$NEW_KEYMAP" > /etc/vconsole.conf
+r "[10] locale=$NEW_LOCALE keymap=$NEW_KEYMAP"
 
-# 主机名
-echo "arch-vm" > /etc/hostname
-cat > /etc/hosts <<'H'
+# ---------- 主机名 ----------
+echo "$NEW_HOSTNAME" > /etc/hostname
+cat > /etc/hosts <<HOSTS
 127.0.0.1   localhost
 ::1         localhost
-127.0.1.1   arch-vm.localdomain arch-vm
-H
-r "[10] hostname=arch-vm"
+127.0.1.1   $NEW_HOSTNAME.localdomain $NEW_HOSTNAME
+HOSTS
+r "[10] hostname=$NEW_HOSTNAME"
 
-# root 密码
-echo "root:arch" | chpasswd
+# ---------- root 密码 ----------
+echo "root:$NEW_ROOT_PW" | chpasswd
 r "[10] root password set"
 
-# 普通用户
-useradd -m -G wheel,audio,video,storage -s /bin/bash arch 2>/dev/null
-echo "arch:arch" | chpasswd
+# ---------- 普通用户 ----------
+useradd -m -G wheel,audio,video,storage -s /bin/bash "$NEW_USER" 2>/dev/null
+echo "$NEW_USER:$NEW_USER_PW" | chpasswd
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
 chmod 440 /etc/sudoers.d/wheel
-r "[10] user 'arch' created with sudo"
+r "[10] user '$NEW_USER' created with sudo"
 
-# 启用服务
+# ---------- 启用服务 ----------
 systemctl enable NetworkManager >/dev/null 2>&1
-systemctl enable sddm >/dev/null 2>&1
-r "[10] services: NetworkManager + sddm enabled"
+if [ -n "$DM" ]; then
+    systemctl enable "$DM" >/dev/null 2>&1
+    r "[10] services: NetworkManager + $DM enabled"
+else
+    r "[10] services: NetworkManager enabled (无显示管理器)"
+fi
 
-# 镜像源
+# ---------- 镜像源 ----------
 mkdir -p /etc/pacman.d
-cat > /etc/pacman.d/mirrorlist <<'MIRROR'
+if [ "$NEW_MIRROR_CN" = "yes" ]; then
+    cat > /etc/pacman.d/mirrorlist <<'MIRROR'
 Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo
 Server = https://mirrors.ustc.edu.cn/archlinuxarm/$arch/$repo
 Server = http://mirror.archlinuxarm.org/$arch/$repo
 MIRROR
+else
+    cat > /etc/pacman.d/mirrorlist <<'MIRROR'
+Server = http://mirror.archlinuxarm.org/$arch/$repo
+MIRROR
+fi
 
-# initramfs
+# ---------- initramfs ----------
 mkinitcpio -P >/tmp/mkinitcpio.log 2>&1
 r "[10] mkinitcpio rc=$? : $(tail -2 /tmp/mkinitcpio.log | tr '\n' ' ')"
 
@@ -252,7 +370,7 @@ bootctl install >/tmp/bootctl.log 2>&1
 BC_RC=$?
 r "[11] bootctl install rc=$BC_RC : $(tail -3 /tmp/bootctl.log | tr '\n' ' ')"
 
-# 兜底：把 systemd-boot 复制到 EFI 默认启动路径 BOOTAA64.EFI
+# 兜底：复制到 UEFI 默认启动路径，防止 bootctl 无法写 EFI 变量
 if [ -f /usr/lib/systemd/boot/efi/systemd-bootaa64.efi ]; then
     mkdir -p /boot/EFI/BOOT
     cp /usr/lib/systemd/boot/efi/systemd-bootaa64.efi /boot/EFI/BOOT/BOOTAA64.EFI
@@ -284,14 +402,17 @@ timeout  3
 LC
 r "[11] loader entry written"
 
-# 中文输入法环境变量
-mkdir -p /home/arch/.config/environment.d
-cat > /home/arch/.config/environment.d/im.conf <<'IM'
+# ---------- 中文输入法环境变量 ----------
+if [ "$NEW_CJK" = "yes" ]; then
+    mkdir -p "/home/$NEW_USER/.config/environment.d"
+    cat > "/home/$NEW_USER/.config/environment.d/im.conf" <<'IM'
 GTK_IM_MODULE=fcitx
 QT_IM_MODULE=fcitx
 XMODIFIERS=@im=fcitx
 IM
-chown -R arch:arch /home/arch/.config 2>/dev/null
+    chown -R "$NEW_USER:$NEW_USER" "/home/$NEW_USER/.config" 2>/dev/null
+    r "[12] fcitx5 环境变量已写入"
+fi
 
 r "[12] chroot configuration COMPLETE"
 CHROOT

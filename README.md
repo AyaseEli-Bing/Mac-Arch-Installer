@@ -21,6 +21,7 @@
 - [为什么需要这个包](#为什么需要这个包)
 - [项目结构](#项目结构)
 - [环境要求](#环境要求)
+- [安装配置（可选）](#安装配置可选)
 - [使用教程](#使用教程)
   - [步骤 1 · 环境自检](#步骤-1--环境自检1-分钟)
   - [步骤 2 · 创建虚拟机](#步骤-2--创建虚拟机仅首次)
@@ -50,18 +51,27 @@ Apple Silicon 上的 Parallels 只能虚拟化 **ARM64** 客户机，而 Arch Li
 ```
 .
 ├── arch-install/
-│   ├── install.sh            # 在 Arch VM 内执行：分区 → 装包 → 配置 → 写引导
-│   ├── serve.py              # 宿主机 HTTP 服务：分发脚本 + 接收安装日志
-│   ├── reset-password.sh     # 忘记密码时用 live 环境 chroot 重置（需自行提供新密码）
-│   ├── check.sh              # 环境自检脚本（宿主机侧一键体检）
-│   ├── proxy-forward.py      # 端口转发：让虚拟机复用宿主机的本地代理
+│   ├── install.sh            # [VM 内]   自动安装：分区 → 装包 → 配置 → 写引导
+│   ├── install.conf.example  # [模板]    安装配置模板（主机名/用户/磁盘/桌面环境…）
+│   ├── dev-setup.sh          # [VM 内]   开发环境一键配置（工具链 + 国内镜像源）
+│   ├── vm-check.sh           # [VM 内]   健康巡检（系统/服务/网络/桌面/Tools）
+│   ├── reset-password.sh     # [VM 内]   忘记密码时经 live 环境 chroot 重置
+│   ├── serve.py              # [宿主机]  HTTP 服务：分发脚本 + 接收安装日志
+│   ├── check.sh              # [宿主机] 环境自检（11 项）
+│   ├── diagnose.sh           # [宿主机] 故障自诊断（逐条检查并给出修复命令）
+│   ├── release.sh            # [宿主机] 自动发版（打标签 / 打包 / 建 Release / 上传附件）
+│   ├── proxy-forward.py      # [宿主机] 端口转发：让虚拟机复用宿主机的本地代理
 │   └── sshkey.pub            # （本地生成，已被 .gitignore 排除）
 ├── README.md                                # 本文件（简体中文）
 ├── README.en.md                             # English README
+├── CHANGELOG.md                             # 版本变更记录
+├── CONTRIBUTING.md                          # 贡献指南与代码规范
 ├── 使用教程.md                              # 完整操作手册（逐步说明 / 功能演示 / 场景 / FAQ）
 ├── 虚拟机网络配置.md                         # 虚拟机访问被宿主机屏蔽站点的排查与解法
 ├── Arch-Linux-ARM-Parallels-安装指南.md     # 手工安装指引（含 archinstall 向导逐步说明）
 ├── 环境配置与验证清单.md                     # 依赖清单、环境变量、构建调试、验证步骤
+├── .github/workflows/ci.yml                 # CI：shellcheck / Python 语法 / Markdown 检查
+├── .markdownlint.json                       # Markdown 检查规则
 └── .gitignore
 ```
 
@@ -92,6 +102,39 @@ curl -sL https://release.archboot.com/aarch64/latest/iso/ | grep -oE 'href="[^"]
 | `...-ARCH-aarch64.iso` | ~470 MB | **推荐**，联网安装 |
 | `...-ARCH-latest-aarch64.iso` | ~295 MB | 最小化 |
 | `...-ARCH-local-aarch64.iso` | ~994 MB | 内置仓库，**可离线安装** |
+
+---
+
+## 安装配置（可选）
+
+`install.sh` 支持通过配置文件定制，**无需修改脚本**。
+把 `install.conf.example` 复制为 `/root/install.conf` 并按需修改即可；不提供该文件时全部沿用默认值，行为与旧版本一致。
+
+**可配置项**
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `NEW_HOSTNAME` | `arch-vm` | 主机名 |
+| `NEW_TIMEZONE` | `Asia/Shanghai` | 时区 |
+| `NEW_LOCALE` | `zh_CN.UTF-8` | 系统语言 |
+| `NEW_KEYMAP` | `us` | 键盘布局 |
+| `NEW_USER` / `NEW_USER_PW` | `arch` / `arch` | 普通用户（⚠️ 装后请改密码） |
+| `NEW_ROOT_PW` | `arch` | root 密码（⚠️ 装后请改密码） |
+| `NEW_DESKTOP` | `kde` | **桌面环境**，见下表 |
+| `NEW_DISK` | 空 | 目标磁盘；留空 = 自动检测容量最大的磁盘 |
+| `NEW_KERNEL` | `linux-aarch64` | 内核包（ARM64 必须此项，勿改成 `linux`） |
+| `NEW_CJK` | `yes` | 是否安装中文字体与 fcitx5 输入法 |
+| `NEW_MIRROR_CN` | `yes` | 是否优先使用国内镜像（清华 / USTC） |
+| `NEW_EXTRA_PKGS` | 空 | 额外软件包，空格分隔，如 `"firefox git htop"` |
+
+**四种桌面环境**
+
+| `NEW_DESKTOP` | 安装内容 | 显示管理器 |
+| --- | --- | --- |
+| `kde` | KDE Plasma | sddm |
+| `gnome` | GNOME | gdm |
+| `xfce` | XFCE | lightdm |
+| `none` | 纯命令行，不装桌面 | 无 |
 
 ---
 
@@ -478,6 +521,8 @@ Archboot 镜像**每日更新**，`install.sh` 中的 ISO 文件名与校验值�
 | **[虚拟机网络配置.md](虚拟机网络配置.md)** | 虚拟机访问被宿主机屏蔽站点的排查与解法（含容器 / WSL 通用性说明） |
 | **[Arch-Linux-ARM-Parallels-安装指南.md](Arch-Linux-ARM-Parallels-安装指南.md)** | 手工安装指引，含 `archinstall` 向导逐步说明 |
 | **[环境配置与验证清单.md](环境配置与验证清单.md)** | 依赖清单、运行时要求、环境变量、构建调试、验证步骤 |
+| **[CHANGELOG.md](CHANGELOG.md)** | 版本变更记录（遵循 Keep a Changelog 与语义化版本） |
+| **[CONTRIBUTING.md](CONTRIBUTING.md)** | 贡献指南、代码规范与发版流程 |
 | **[README.en.md](README.en.md)** | English introduction & usage guide |
 
 ## 许可证

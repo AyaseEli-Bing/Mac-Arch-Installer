@@ -1,0 +1,47 @@
+# ============================================================
+# Mac-Arch-Installer 安装配置模板
+#
+# 用法：
+#   1. 复制本文件到虚拟机内的 /root/install.conf
+#   2. 按需修改（也可只保留需要覆盖的项）
+#   3. 执行安装脚本，脚本会自动读取
+#
+# 说明：
+#   - 若该文件不存在，安装脚本使用内置默认值
+#   - 每项都有默认值，只需写你关心的
+# ============================================================
+
+# ---------- 系统标识 ----------
+NEW_HOSTNAME="arch-vm"              # 主机名
+NEW_TIMEZONE="Asia/Shanghai"        # 时区（/usr/share/zoneinfo 下的路径）
+NEW_LOCALE="zh_CN.UTF-8"            # 系统语言
+NEW_KEYMAP="us"                     # 键盘布局（控制台 keymap）
+
+# ---------- 账户 ----------
+NEW_USER="arch"                     # 普通用户名
+NEW_USER_PW="arch"                  # ⚠️ 普通用户密码，安装后请立即修改
+NEW_ROOT_PW="arch"                  # ⚠️ root 密码，安装后请立即修改
+
+# ---------- 桌面环境 ----------
+#   kde   → KDE Plasma（显示管理器 sddm）
+#   gnome → GNOME（显示管理器 gdm）
+#   xfce  → XFCE（显示管理器 lightdm）
+#   none  → 纯命令行，不装桌面
+NEW_DESKTOP="kde"
+
+# ---------- 磁盘 ----------
+# 留空 = 自动检测容量最大的磁盘
+# ⚠️ 目标磁盘上的所有数据将被清空
+NEW_DISK=""
+
+# ---------- 内核 ----------
+# ARM64 必须为 linux-aarch64（不要改成 linux）
+NEW_KERNEL="linux-aarch64"
+
+# ---------- 可选组件 ----------
+NEW_CJK="yes"                       # 中文字体 + fcitx5 输入法: yes | no
+NEW_MIRROR_CN="yes"                 # 优先国内镜像（清华 / USTC）: yes | no
+
+# ---------- 额外软件包 ----------
+# 空格分隔，例如: NEW_EXTRA_PKGS="firefox git htop tmux"
+NEW_EXTRA_PKGS=""
