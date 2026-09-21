@@ -1,8 +1,18 @@
 # Mac 虚拟机安装 Arch Linux 懒人包
 
+[![Release](https://img.shields.io/github/v/release/AyaseEli-Bing/Mac-Arch-Installer?label=version&color=blue)](https://github.com/AyaseEli-Bing/Mac-Arch-Installer/releases)
+[![License](https://img.shields.io/github/license/AyaseEli-Bing/Mac-Arch-Installer?color=green)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Apple%20Silicon-black)](#环境要求)
+[![Arch](https://img.shields.io/badge/arch-aarch64-orange)](#为什么需要这个包)
+[![Guest OS](https://img.shields.io/badge/guest-Arch%20Linux%20ARM-1793d1)](#为什么需要这个包)
+
+[简体中文](README.md) | [English](README.en.md)
+
 在 **Apple Silicon Mac** 上用 **Parallels Desktop** 安装 **Arch Linux ARM** 的自动化工具包。
 
 > 一条命令完成分区、装包、系统配置与引导安装。附带环境自检、实时日志回传、SSH 免密登录与密码重置能力。
+
+**关键词：** `arch-linux` · `arch-linux-arm` · `archboot` · `parallels-desktop` · `apple-silicon` · `aarch64` · `arm64` · `虚拟化` · `macos` · `自动化安装`
 
 ---
 
@@ -46,6 +56,8 @@ Apple Silicon 上的 Parallels 只能虚拟化 **ARM64** 客户机，而 Arch Li
 │   ├── check.sh              # 环境自检脚本（宿主机侧一键体检）
 │   ├── proxy-forward.py      # 端口转发：让虚拟机复用宿主机的本地代理
 │   └── sshkey.pub            # （本地生成，已被 .gitignore 排除）
+├── README.md                                # 本文件（简体中文）
+├── README.en.md                             # English README
 ├── 使用教程.md                              # 完整操作手册（逐步说明 / 功能演示 / 场景 / FAQ）
 ├── 虚拟机网络配置.md                         # 虚拟机访问被宿主机屏蔽站点的排查与解法
 ├── Arch-Linux-ARM-Parallels-安装指南.md     # 手工安装指引（含 archinstall 向导逐步说明）
@@ -466,6 +478,7 @@ Archboot 镜像**每日更新**，`install.sh` 中的 ISO 文件名与校验值�
 | **[虚拟机网络配置.md](虚拟机网络配置.md)** | 虚拟机访问被宿主机屏蔽站点的排查与解法（含容器 / WSL 通用性说明） |
 | **[Arch-Linux-ARM-Parallels-安装指南.md](Arch-Linux-ARM-Parallels-安装指南.md)** | 手工安装指引，含 `archinstall` 向导逐步说明 |
 | **[环境配置与验证清单.md](环境配置与验证清单.md)** | 依赖清单、运行时要求、环境变量、构建调试、验证步骤 |
+| **[README.en.md](README.en.md)** | English introduction & usage guide |
 
 ## 许可证
 
