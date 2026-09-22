@@ -13,6 +13,18 @@ PORT_PROXY=8888
 HOST_SHARED="10.211.55.2"
 HOST_HOSTONLY="10.37.129.2"
 
+# ---------- 共用资源探测片段 ----------
+# 与 check.sh source 同一文件，保证两个脚本对容量与分配量的结论一致。
+HR_DIR=$(dirname -- "$0")
+[ "$HR_DIR" = "$0" ] && HR_DIR="."
+HR_LIB="$HR_DIR/host-res.sh"
+if [ ! -f "$HR_LIB" ]; then
+    echo "缺少资源探测片段 $HR_LIB，无法完成诊断" >&2
+    exit 1
+fi
+# shellcheck source=/dev/null
+. "$HR_LIB"
+
 if [ -t 1 ]; then
     G="\033[32m"; Y="\033[33m"; R="\033[31m"; B="\033[36m"; N="\033[0m"
 else
@@ -104,7 +116,39 @@ else
     fix "curl -fL -o \"\$HOME/Downloads/archboot-<日期>-aarch64-ARCH-aarch64.iso\" https://release.archboot.com/aarch64/latest/iso/<文件名>"
 fi
 
-# ---------- 6. 分发服务 ----------
+# ---------- 6. 宿主机资源水位 ----------
+sec "宿主机资源水位"
+hr_probe "$PRL" "$VM"
+printf '         宿主机: %sGiB 内存 / %s 核 ｜ %s 所在卷余 %sGiB\n' \
+    "${HR_HOST_MEM_GB:-?}" "${HR_HOST_CPU:-?}" "$HR_VM_HOME" "${HR_AVAIL_GB:-?}"
+printf '         虚拟机分配: %sMb 内存 / %s 核\n' "${HR_VM_MEM_MB:-未取到}" "${HR_VM_CPU:-未取到}"
+case "$(hr_disk_level)" in
+    unknown) fail "无法读取 $HR_VM_HOME 所在卷的可用空间" ;;
+    fail)    fail "宿主机仅余 ${HR_AVAIL_GB}GiB，低于 ${HR_DISK_FAIL_GB}GiB —— 安装几乎必然中途失败"
+             fix "清理磁盘，或在 Parallels 图形界面把虚拟机迁移到更大容量磁盘（快照按整机容量占用）" ;;
+    warn)    warn "宿主机余 ${HR_AVAIL_GB}GiB —— 够装，但系统更新与快照没有余量"
+             fix "建议为虚拟机预留 ${HR_DISK_WARN_GB}GiB 以上" ;;
+    ok)      pass "宿主机余 ${HR_AVAIL_GB}GiB，容量充足" ;;
+esac
+HR_MEM_TARGET=$(hr_mem_target_mb)
+case "$(hr_mem_level)" in
+    fail)    fail "虚拟机 ${HR_VM_MEM_MB}Mb 已超过宿主机物理内存 ${HR_HOST_MEM_GB}GiB"
+             if [ -n "$HR_MEM_TARGET" ]; then
+                 fix "关机后执行: \"$PRL\" set \"$VM\" --memsize $HR_MEM_TARGET"
+             fi ;;
+    warn)    warn "虚拟机独占宿主机内存的 $(hr_mem_pct)%，macOS 与虚拟机桌面同时运行会紧张"
+             if [ -n "$HR_MEM_TARGET" ] && [ "$HR_MEM_TARGET" -lt "$HR_VM_MEM_MB" ]; then
+                 fix "关机后执行: \"$PRL\" set \"$VM\" --memsize $HR_MEM_TARGET（宿主机 ${HR_MEM_TARGET_PCT}% 以内）"
+             fi ;;
+    ok)      pass "虚拟机内存分配未超过宿主机 ${HR_MEM_WARN_PCT}%" ;;
+    skip)    printf '         未取到虚拟机内存分配（未创建？），跳过分配量对照\n' ;;
+esac
+if [ "$(hr_cpu_over)" = "yes" ]; then
+    warn "虚拟机 $HR_VM_CPU 核 超过宿主机逻辑核心 $HR_HOST_CPU 个（超配会互相抢时间片）"
+    fix "关机后执行: \"$PRL\" set \"$VM\" --cpus $HR_HOST_CPU"
+fi
+
+# ---------- 7. 分发服务 ----------
 sec "分发服务（安装期需要）"
 if port_listening "$PORT_SERVE"; then
     pass "端口 $PORT_SERVE 已监听"
@@ -120,7 +164,7 @@ else
     fix "cd arch-install && python3 serve.py"
 fi
 
-# ---------- 7. 代理转发（GitHub 访问） ----------
+# ---------- 8. 代理转发（GitHub 访问） ----------
 sec "代理转发（GitHub 加速）"
 if port_listening "$PORT_PROXY"; then
     pass "端口 $PORT_PROXY 已监听"
@@ -130,7 +174,7 @@ else
     fix "cd arch-install && python3 proxy-forward.py"
 fi
 
-# ---------- 8. 虚拟机网络可达性 ----------
+# ---------- 9. 虚拟机网络可达性 ----------
 sec "虚拟机网络"
 VMIP=""
 for cand in $(arp -an 2>/dev/null | grep -oE '10\.(211\.55|37\.129)\.[0-9]+' | sort -u); do
@@ -143,7 +187,7 @@ else
     fix "在虚拟机内执行: sudo pacman -S openssh && sudo systemctl enable --now sshd"
 fi
 
-# ---------- 9. 虚拟机内部状态（若可 SSH） ----------
+# ---------- 10. 虚拟机内部状态（若可 SSH） ----------
 if [ -n "$VMIP" ]; then
     sec "虚拟机内部状态"
     if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \

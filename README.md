@@ -57,8 +57,9 @@ Apple Silicon 上的 Parallels 只能虚拟化 **ARM64** 客户机，而 Arch Li
 │   ├── vm-check.sh           # [VM 内]   健康巡检（系统/服务/网络/桌面/Tools）
 │   ├── reset-password.sh     # [VM 内]   忘记密码时经 live 环境 chroot 重置
 │   ├── serve.py              # [宿主机]  HTTP 服务：分发脚本 + 接收安装日志
-│   ├── check.sh              # [宿主机] 环境自检（11 项）
+│   ├── check.sh              # [宿主机] 环境自检（5 组：工具/资源/介质/虚拟机/分发服务）
 │   ├── diagnose.sh           # [宿主机] 故障自诊断（逐条检查并给出修复命令）
+│   ├── host-res.sh           # [共用]   宿主机资源探测片段（被上两个脚本 source）
 │   ├── release.sh            # [宿主机] 自动发版（打标签 / 打包 / 建 Release / 上传附件）
 │   ├── proxy-forward.py      # [宿主机] 端口转发：让虚拟机复用宿主机的本地代理
 │   └── sshkey.pub            # （本地生成，已被 .gitignore 排除）
