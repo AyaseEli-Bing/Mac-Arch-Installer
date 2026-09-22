@@ -3,6 +3,7 @@
 # 虚拟机健康巡检（在 Arch Linux ARM 虚拟机内运行）
 #
 # 用法: bash vm-check.sh
+#       MANIFEST=/path/to/dev-env.manifest bash vm-check.sh   # 指定环境清单
 # 特点: 只读检查，不做任何修改；无需 sudo；退出码 = FAIL 项数量
 # ============================================================
 
@@ -144,6 +145,63 @@ if command -v checkupdates >/dev/null 2>&1; then
     fi
 else
     kv "更新检查" "checkupdates 未安装（属于 pacman-contrib 包）"
+fi
+
+# ---------- 开发环境清单完整度 ----------
+# 清单格式与解析规则以 dev-env.manifest 头部为准，此处只读核对、不做任何修改。
+# 找不到清单时不报失败：vm-check.sh 支持单文件拷进虚拟机使用，不应因此变红。
+vc_pkgs() {
+    awk -v want="$2" '
+        /^\[/ { g=$0; sub(/^\[/,"",g); sub(/\].*$/,"",g); next }
+        /^[[:space:]]*[#;]/ { next }
+        /^@/ { next }
+        g==want { for (i=1; i<=NF; i++) if ($i != "") print $i }
+    ' "$1"
+}
+vc_has_group() {
+    awk -v want="$2" '
+        /^\[/ { g=$0; sub(/^\[/,"",g); sub(/\].*$/,"",g); if (g==want) { found=1; exit } }
+        END { exit !found }
+    ' "$1"
+}
+
+VC_MF="$MANIFEST"
+if [ -z "$VC_MF" ]; then
+    VC_D=$(dirname -- "$0")
+    [ "$VC_D" = "$0" ] && VC_D="."
+    for cand in "$VC_D/dev-env.manifest" "$HOME/dev-env.manifest" "/tmp/dev-env.manifest"; do
+        if [ -f "$cand" ]; then VC_MF="$cand"; break; fi
+    done
+fi
+
+if [ -n "$VC_MF" ] && [ -f "$VC_MF" ]; then
+    VC_LANGS=$(awk '/^@default_langs/ { sub(/^@default_langs[[:space:]]*/,""); print; exit }' "$VC_MF")
+    VC_GROUPS="base cli"
+    for lg in $VC_LANGS; do
+        vc_has_group "$VC_MF" "$lg" && VC_GROUPS="$VC_GROUPS $lg"
+    done
+    VC_TOTAL=0; VC_HAVE=0; VC_MISS=""
+    for grp in $VC_GROUPS; do
+        for p in $(vc_pkgs "$VC_MF" "$grp"); do
+            VC_TOTAL=$((VC_TOTAL + 1))
+            if pacman -Qi "$p" >/dev/null 2>&1; then
+                VC_HAVE=$((VC_HAVE + 1))
+            else
+                VC_MISS="$VC_MISS $p"
+            fi
+        done
+    done
+    kv "环境清单" "$(basename "$VC_MF")（组: $(printf '%s' "$VC_GROUPS" | tr '\n' ' ')）"
+    if [ "$VC_TOTAL" -gt 0 ]; then
+        if [ "$VC_HAVE" -eq "$VC_TOTAL" ]; then
+            pass "开发环境完整度 $VC_HAVE/$VC_TOTAL"
+        else
+            warn "开发环境完整度 $VC_HAVE/$VC_TOTAL，缺：${VC_MISS# }"
+            kv "补齐方式" "bash dev-setup.sh"
+        fi
+    fi
+else
+    kv "环境清单" "未找到 dev-env.manifest —— 与 dev-setup.sh 一起拷贝后可核对完整度"
 fi
 
 # ---------- 汇总 ----------

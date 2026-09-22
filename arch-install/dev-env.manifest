@@ -1,0 +1,52 @@
+# ============================================================
+# 开发环境清单（Arch Linux 侧）
+#
+# 谁在用这份文件：
+#   - dev-setup.sh   核对差异 / 补齐安装 / 导出当前环境
+#   - vm-check.sh    报告「环境完整度 N/M」与缺失项
+#
+# 为什么单独成文件：包清单原先写死在 dev-setup.sh 里三处
+# （基础工具、CLI 工具、语言映射），既无法回答「我缺什么」，
+# 也无法复用到第二台机器。改为单点定义后，两个脚本读同一份，
+# 不会出现一边认为齐了、另一边认为缺的矛盾结论。
+#
+# 语法（极简，便于 shell 解析）：
+#   [组名]              开始一个组
+#   包名 包名           组内的包，空格或换行分隔均可
+#   @指令 参数          元信息，不属于任何组
+#   #  开头为注释；空行忽略
+#
+# 组的含义：
+#   base   所有场景必装的基础工具
+#   cli    日常命令行增强（可由 INSTALL_CLI=no 跳过）
+#   其余组名 = dev-setup.sh 的 LANGS 取值，按需选择
+#
+# @default_langs：未显式设置 LANGS 时，dev-setup.sh 与 vm-check.sh 共同采用的
+#   语言组。放在这里而不是各脚本里写死，是为了让「默认装哪些」只有一个答案。
+# ============================================================
+
+@default_langs go python node rust
+
+[base]
+git curl wget unzip which inetutils base-devel
+
+[cli]
+ripgrep fd bat htop tmux jq tree less
+
+[go]
+go
+
+[python]
+python python-pip python-virtualenv
+
+[node]
+nodejs npm
+
+[rust]
+rust
+
+[cpp]
+cmake ninja clang gdb
+
+[java]
+jdk-openjdk

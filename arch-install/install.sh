@@ -76,6 +76,72 @@ r() {
     curl -s -m 10 -X POST -d "$1" "$HOST_URL/log" >/dev/null 2>&1
 }
 
+# ---------- 镜像源：候选清单 / 探活 / 择优写入 ----------
+# 候选地址只在这里定义一次。原实现在 step 6 与 chroot 脚本里各写一份同样的
+# mirrorlist，改一处漏一处，且 chroot 那份会把前面的结果覆盖掉。
+MIRROR_CN="
+https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm
+https://mirrors.ustc.edu.cn/archlinuxarm
+http://mirror.archlinuxarm.org
+"
+MIRROR_OFFICIAL="
+http://mirror.archlinuxarm.org
+"
+MIRROR_PROBE_TIMEOUT=6      # 单站探测上限；三站全超时的最坏情况约 18 秒
+
+MM_STATUS=""                # probed | fallback | official
+MM_SELECTED=""
+MM_LATENCY=""
+
+# 逐站探活，取响应最快者。bash 没有浮点比较，交给 awk。
+# 注意：curl 即使连接超时失败，-w '%{time_total}' 仍会输出一个数字，
+# 因此必须同时校验退出码与 http_code，否则不可达的站点会被当成探活成功。
+mm_select() {
+    MM_SELECTED=""
+    MM_LATENCY=""
+    for _u in $MIRROR_CN; do
+        _r=$(curl -sS -o /dev/null -m "$MIRROR_PROBE_TIMEOUT" \
+                 -w '%{http_code} %{time_total}' "$_u/" 2>/dev/null)
+        [ $? -ne 0 ] && continue
+        _code=${_r%% *}
+        _t=${_r##* }
+        # http_code 为 000 表示压根没拿到 HTTP 响应；404/403 只说明路径不对，
+        # 站点本身可达，仍应参与择优。
+        [ "$_code" = "000" ] && continue
+        case "$_t" in ''|*[!0-9.]*) continue ;; esac
+        if [ -z "$MM_SELECTED" ] || awk -v a="$_t" -v b="$MM_LATENCY" 'BEGIN{exit !(a<b)}'; then
+            MM_SELECTED="$_u"
+            MM_LATENCY="$_t"
+        fi
+    done
+}
+
+# 生成 mirrorlist 到 $1。全部探测失败时退回静态顺序而不中止安装
+# （探测本身不该成为新的失败源）。结果写入全局 MM_STATUS，
+# 因此必须以普通命令调用，不能用 $() —— 那样赋值会随子 shell 丢失。
+mm_write() {
+    _out="$1"
+    if [ "$NEW_MIRROR_CN" != "yes" ]; then
+        # shellcheck disable=SC2086
+        printf 'Server = %s/$arch/$repo\n' $MIRROR_OFFICIAL > "$_out"
+        MM_STATUS="official"
+        return
+    fi
+    mm_select
+    if [ -z "$MM_SELECTED" ]; then
+        # shellcheck disable=SC2086
+        printf 'Server = %s/$arch/$repo\n' $MIRROR_CN > "$_out"
+        MM_STATUS="fallback"
+        return
+    fi
+    # 最快者排首位，其余保持原顺序作后备
+    printf 'Server = %s/$arch/$repo\n' "$MM_SELECTED" > "$_out"
+    for _u in $MIRROR_CN; do
+        [ "$_u" = "$MM_SELECTED" ] || printf 'Server = %s/$arch/$repo\n' "$_u" >> "$_out"
+    done
+    MM_STATUS="probed"
+}
+
 # ---------- 0. 环境检查 ----------
 r "[0] script started"
 ARCH=$(uname -m)
@@ -222,20 +288,13 @@ fi
 
 # ---------- 6. 配置镜像源 ----------
 mkdir -p /mnt/etc/pacman.d
-if [ "$NEW_MIRROR_CN" = "yes" ]; then
-    cat > /etc/pacman.d/mirrorlist <<'MIRROR'
-Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo
-Server = https://mirrors.ustc.edu.cn/archlinuxarm/$arch/$repo
-Server = http://mirror.archlinuxarm.org/$arch/$repo
-MIRROR
-    r "[6] mirrorlist: 国内镜像优先（清华 / USTC）"
-else
-    cat > /etc/pacman.d/mirrorlist <<'MIRROR'
-Server = http://mirror.archlinuxarm.org/$arch/$repo
-MIRROR
-    r "[6] mirrorlist: 官方源"
-fi
+mm_write /etc/pacman.d/mirrorlist
 cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
+case "$MM_STATUS" in
+    probed)   r "[6] mirrorlist: 探活择优 → $MM_SELECTED（${MM_LATENCY}s），其余作后备" ;;
+    fallback) r "[6][WARN] 候选镜像全部探测失败，已退回静态顺序；若下一步 pacstrap 失败，先确认虚拟机网卡为 shared 与宿主机代理状态" ;;
+    official) r "[6] mirrorlist: 官方源（NEW_MIRROR_CN != yes）" ;;
+esac
 r "[6] mirrorlist configured"
 
 # ---------- 7. 初始化密钥环 ----------
@@ -294,7 +353,22 @@ if [ $PS_RC -ne 0 ]; then
     if [ "$PS_RC" -eq 141 ]; then
         r "[8][FATAL] pacstrap 被中断(rc=141 SIGPIPE)：通常是终端里按了 Ctrl+C 或被切走。中止。"
     else
-        r "[8][FATAL] pacstrap 失败(rc=$PS_RC)：常见原因 网络不可达 / 磁盘空间不足。中止。"
+        # 按日志实际内容定位原因，替代过去那句无法区分的「网络不可达 / 磁盘空间不足」
+        r "[8][FATAL] pacstrap 失败(rc=$PS_RC)。按日志判读："
+        if grep -qiE 'could not resolve host|connection refused|failed to download|Operation timed out|Could not connect' /tmp/pacstrap.log; then
+            r "[8][CAUSE] 镜像站不可达。当时生效的镜像顺序：$(awk -F' = ' '/^Server/{printf "%s ", $2}' /etc/pacman.d/mirrorlist)"
+            r "[8][HINT]  最常见原因是虚拟机网卡为 host-only（无外网出口）——宿主机执行: bash diagnose.sh"
+        fi
+        if grep -qiE 'signature|keyring|invalid or corrupted package' /tmp/pacstrap.log; then
+            r "[8][CAUSE] 包签名或密钥环校验失败。多因系统时钟偏差过大，先核对 date 与真实时间。"
+        fi
+        if grep -qiE 'no space left|not enough free space' /tmp/pacstrap.log; then
+            r "[8][CAUSE] 磁盘空间不足：/mnt 可用 $(df -h /mnt 2>/dev/null | tail -1 | awk '{print $4}')"
+        fi
+        if grep -qiE 'target .* not found|package .* not found' /tmp/pacstrap.log; then
+            r "[8][CAUSE] 有包名在当前仓库中不存在：$(grep -ioE 'target [^ ]+ not found' /tmp/pacstrap.log | head -3 | tr '\n' ' ')"
+            r "[8][HINT]  若刚改过 NEW_EXTRA_PKGS 或 NEW_DESKTOP 组合，用 pacman -Ss 确认包名"
+        fi
     fi
     exit 1
 fi
@@ -374,18 +448,8 @@ else
 fi
 
 # ---------- 镜像源 ----------
-mkdir -p /etc/pacman.d
-if [ "$NEW_MIRROR_CN" = "yes" ]; then
-    cat > /etc/pacman.d/mirrorlist <<'MIRROR'
-Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo
-Server = https://mirrors.ustc.edu.cn/archlinuxarm/$arch/$repo
-Server = http://mirror.archlinuxarm.org/$arch/$repo
-MIRROR
-else
-    cat > /etc/pacman.d/mirrorlist <<'MIRROR'
-Server = http://mirror.archlinuxarm.org/$arch/$repo
-MIRROR
-fi
+# 此处刻意不再重写 mirrorlist：step 6 已探活择优并复制到 /mnt/etc/pacman.d/mirrorlist。
+# 原实现在这里又写了一遍静态顺序，会把择优结果覆盖掉。
 
 # ---------- initramfs ----------
 mkinitcpio -P >/tmp/mkinitcpio.log 2>&1
