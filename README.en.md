@@ -495,6 +495,7 @@ pulls scripts with `curl`, and each step posts its status back — visible on th
 | Document | Contents |
 | --- | --- |
 | **[使用教程.md](使用教程.md)** | Full manual: step-by-step, feature demos, scenarios, 12 FAQs (Chinese) |
+| **[自检功能使用教程.md](自检功能使用教程.md)** | Self-check tools: purpose, check items, result semantics, next actions (Chinese) |
 | **[虚拟机网络配置.md](虚拟机网络配置.md)** | Diagnosing VM access to host-blocked sites; applies to Docker/WSL too (Chinese) |
 | **[Arch-Linux-ARM-Parallels-安装指南.md](Arch-Linux-ARM-Parallels-安装指南.md)** | Manual install guide with `archinstall` walkthrough (Chinese) |
 | **[环境配置与验证清单.md](环境配置与验证清单.md)** | Dependencies, runtime requirements, env vars, build & debug, verification (Chinese) |
