@@ -365,8 +365,11 @@ if [ $PS_RC -ne 0 ]; then
         if grep -qiE 'no space left|not enough free space' /tmp/pacstrap.log; then
             r "[8][CAUSE] 磁盘空间不足：/mnt 可用 $(df -h /mnt 2>/dev/null | tail -1 | awk '{print $4}')"
         fi
-        if grep -qiE 'target .* not found|package .* not found' /tmp/pacstrap.log; then
-            r "[8][CAUSE] 有包名在当前仓库中不存在：$(grep -ioE 'target [^ ]+ not found' /tmp/pacstrap.log | head -3 | tr '\n' ' ')"
+        # 注意匹配的是字面量 "target not found"：pacman 的文案里 target 与 not 之间
+        # 没有词，写成 'target .* not found' 会永不匹配，这条诊断就成了摆设。
+        NF=$(sed -n 's/.*target not found: *//Ip' /tmp/pacstrap.log | head -5 | tr '\n' ' ')
+        if [ -n "$NF" ]; then
+            r "[8][CAUSE] 有包名在当前仓库中不存在：$NF"
             r "[8][HINT]  若刚改过 NEW_EXTRA_PKGS 或 NEW_DESKTOP 组合，用 pacman -Ss 确认包名"
         fi
     fi
