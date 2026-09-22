@@ -1,4 +1,4 @@
-# Mac 虚拟机安装 Arch Linux 懒人包
+# Mac-Arch-Installer
 
 [![Release](https://img.shields.io/github/v/release/AyaseEli-Bing/Mac-Arch-Installer?label=version&color=blue)](https://github.com/AyaseEli-Bing/Mac-Arch-Installer/releases)
 [![License](https://img.shields.io/github/license/AyaseEli-Bing/Mac-Arch-Installer?color=green)](LICENSE)
@@ -8,7 +8,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-在 **Apple Silicon Mac** 上用 **Parallels Desktop** 安装 **Arch Linux ARM** 的自动化工具包。
+**Mac 虚拟机安装 Arch Linux 懒人包** —— 在 Apple Silicon Mac 上用 Parallels Desktop 安装 Arch Linux ARM 的自动化工具包。
 
 > 一条命令完成分区、装包、系统配置与引导安装。附带环境自检、实时日志回传、SSH 免密登录与密码重置能力。
 
