@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-23
+
 ### 新增
 
 - **`dev-env.manifest`**：开发环境包清单，单一事实源。原先包列表以三处硬编码
@@ -217,7 +219,8 @@
   直接使用 Arch 官方 ISO 即可，无需本项目。
 - Parallels Tools 官方不支持 Arch，属社区级支持。
 
-[Unreleased]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.0...v1.2.1
