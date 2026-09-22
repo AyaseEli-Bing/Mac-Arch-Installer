@@ -193,14 +193,43 @@ if [ -n "$VMIP" ]; then
     if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
            -o BatchMode=yes -o ConnectTimeout=8 "arch@$VMIP" true 2>/dev/null; then
         pass "SSH 公钥登录可用"
+        # 前后各取一次宿主机时间并以中点作基准：SSH 建连本身要耗数秒，
+        # 只用开始时间会把虚拟机时钟判得偏慢。
+        _ht1=$(date +%s)
         INFO=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
-               "arch@$VMIP" 'uname -m; df / | tail -1 | awk "{print \$5}"; systemctl is-active NetworkManager; systemctl is-active prltoolsd 2>/dev/null || echo inactive' 2>/dev/null)
+               "arch@$VMIP" 'uname -m; df / | tail -1 | awk "{print \$5}"; systemctl is-active NetworkManager; systemctl is-active prltoolsd 2>/dev/null || echo inactive; date +%s' 2>/dev/null)
+        _ht2=$(date +%s)
+        HOST_T=$(( (_ht1 + _ht2) / 2 ))
         ARCH_VM=$(echo "$INFO" | sed -n 1p)
         USE_VM=$(echo "$INFO" | sed -n 2p)
         NM_VM=$(echo "$INFO" | sed -n 3p)
         PRL_VM=$(echo "$INFO" | sed -n 4p)
+        VM_T=$(echo "$INFO" | sed -n 5p)
         [ "$ARCH_VM" = "aarch64" ] && pass "虚拟机架构正确" || warn "虚拟机架构异常: $ARCH_VM"
         printf '         根分区使用率: %s\n' "${USE_VM:-未知}"
+
+        # 时钟偏差：宿主机就是基准，不依赖外网。挂起/恢复会让客户机时钟停在挂起那一刻，
+        # 而虚拟机内 timedatectl 的 "synchronized" 字段仍报 yes，不可作判据。
+        # 阈值与 vm-check.sh 的外部基准判定保持一致。
+        case "$VM_T" in
+            ''|*[!0-9]*)
+                printf '         虚拟机时钟: 未取到，跳过偏差判定\n'
+                ;;
+            *)
+                CLK_DIFF=$((VM_T - HOST_T))
+                CLK_ABS=$CLK_DIFF
+                [ "$CLK_ABS" -lt 0 ] && CLK_ABS=$(( -CLK_DIFF ))
+                if [ "$CLK_DIFF" -ge 0 ]; then CLK_DIR="快"; else CLK_DIR="慢"; fi
+                printf '         时钟偏差: %ss（虚拟机%s）\n' "$CLK_ABS" "$CLK_DIR"
+                if   [ "$CLK_ABS" -le 60 ];  then pass "虚拟机时钟与宿主机一致"
+                elif [ "$CLK_ABS" -le 600 ]; then warn "虚拟机时钟比宿主机${CLK_DIR} ${CLK_ABS}s"
+                else fail "虚拟机时钟比宿主机${CLK_DIR} ${CLK_ABS}s，pacman 签名与 TLS 校验会受影响"; fi
+                if [ "$CLK_ABS" -gt 60 ]; then
+                    fix "虚拟机内执行: sudo hwclock --hctosys（从主板 RTC 回读；时钟停在挂起时刻时这一步就够）"
+                fi
+                ;;
+        esac
+
         [ "$NM_VM" = "active" ] && pass "NetworkManager 运行中" || fail "NetworkManager 未运行"
         if [ "$PRL_VM" = "active" ]; then
             pass "Parallels Tools 运行中"

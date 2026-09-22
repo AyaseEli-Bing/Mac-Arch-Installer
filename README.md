@@ -55,7 +55,7 @@ Apple Silicon 上的 Parallels 只能虚拟化 **ARM64** 客户机，而 Arch Li
 │   ├── install.conf.example  # [模板]    安装配置模板（主机名/用户/磁盘/桌面环境…）
 │   ├── dev-setup.sh          # [VM 内]   开发环境：核对 / 补齐 / 导出三种模式
 │   ├── dev-env.manifest      # [数据]    包清单（dev-setup.sh 与 vm-check.sh 共用）
-│   ├── vm-check.sh           # [VM 内]   健康巡检（系统/服务/网络/桌面/Tools/完整度）
+│   ├── vm-check.sh           # [VM 内]   健康巡检（系统/时钟/服务/网络/桌面/Tools/完整度）
 │   ├── reset-password.sh     # [VM 内]   忘记密码时经 live 环境 chroot 重置
 │   ├── serve.py              # [宿主机]  HTTP 服务：分发脚本 + 接收安装日志
 │   ├── check.sh              # [宿主机] 环境自检（5 组：工具/资源/介质/虚拟机/分发服务）

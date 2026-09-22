@@ -32,6 +32,37 @@ kv "主机名"   "$(cat /etc/hostname 2>/dev/null)"
 kv "运行时长" "$(uptime -p 2>/dev/null | sed 's/^up //')"
 [ "$(uname -m)" = "aarch64" ] && pass "架构正确（aarch64）" || fail "架构不是 aarch64"
 
+# ---------- 时钟 ----------
+sec "时钟"
+# 基准取 HTTP（而非 HTTPS）镜像站响应的 Date 头：时钟偏到证书有效期之外时，
+# HTTPS 自身就会握手失败，拿它来校时钟会陷入循环依赖。
+# 阈值与 diagnose.sh 的「宿主机↔虚拟机」偏差判定保持一致（60s 容忍网络抖动）。
+CLK_HDR=$(curl -sI -m 8 http://mirror.archlinuxarm.org/ 2>/dev/null | tr -d '\r')
+CLK_REF_TXT=$(printf '%s\n' "$CLK_HDR" | sed -n 's/^[Dd]ate:[[:space:]]*//p' | head -1)
+CLK_REF=$(date -u -d "$CLK_REF_TXT" +%s 2>/dev/null)
+CLK_NOW=$(date -u +%s)
+if [ -z "$CLK_REF" ]; then
+    kv "外部基准" "未取到可用时间源（镜像站无响应或 Date 头无法解析），跳过偏差判定"
+else
+    CLK_SKEW=$((CLK_NOW - CLK_REF))
+    CLK_ABS=$CLK_SKEW
+    [ "$CLK_ABS" -lt 0 ] && CLK_ABS=$(( -CLK_SKEW ))
+    if [ "$CLK_SKEW" -ge 0 ]; then CLK_DIR="快"; else CLK_DIR="慢"; fi
+    kv "本机 UTC"      "$(date -u '+%F %T')"
+    kv "基准 UTC"      "$(date -u -d "@$CLK_REF" '+%F %T')"
+    kv "偏差"          "${CLK_ABS}s（本机${CLK_DIR}）"
+    if   [ "$CLK_ABS" -le 60 ];  then pass "时钟准确（偏差 ${CLK_ABS}s）"
+    elif [ "$CLK_ABS" -le 600 ]; then warn "时钟偏差 ${CLK_ABS}s，可能影响证书与 pacman 签名校验"
+    else fail "时钟偏差 ${CLK_ABS}s（本机${CLK_DIR}），TLS 与包签名校验大概率失败"; fi
+    if [ "$CLK_ABS" -gt 60 ]; then
+        kv "校正" "sudo hwclock --hctosys    # 从主板 RTC 回读，挂起导致的漂移这一步就能修"
+        kv "兜底" "sudo timedatectl set-ntp true && sudo systemctl restart systemd-timesyncd"
+    fi
+fi
+# 刻意不以 timedatectl 的 "System clock synchronized" 作判据：
+# 实测虚拟机挂起/恢复后时钟停在挂起那一刻，该字段仍报 yes。
+kv "NTP 服务" "$(timedatectl show -p NTP --value 2>/dev/null || echo 未知)"
+
 # ---------- 磁盘 ----------
 sec "磁盘"
 ROOT_USE=$(df / 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%')
