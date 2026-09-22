@@ -7,6 +7,26 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-22
+
+本版本为纯文档增量，不涉及任何脚本行为变更。
+
+### 新增
+
+- **`GitHub零基础入门教程.md`**：面向零基础用户的完整中文教程，共 12 节。
+  覆盖 Git 与 GitHub 的区别、SSH 密钥准备、仓库创建与克隆、提交与推送、
+  分支模型、Pull Request 流程、常见报错自救、命令速查表与术语对照、
+  练习路线，以及语义化版本与标签（tag）的用法。
+- **`README徽章体系指南.md`**：讲解 README 徽章（badge）的作用与设计原则、
+  8 个维度的分类速查表、徽章结构与生成方式、挑选与排布的实践建议、
+  常见误区、3 套可直接抄用的模板，以及提交 README 前的逐项速查清单。
+
+### 修复
+
+- **`GitHub零基础入门教程.md`**：修复 6 处 markdownlint 报错
+  （引用块内空行、列表内围栏代码块缺空行、强调标记内空格），
+  使新增文档与 CI 的 `markdownlint-cli2` 检查口径一致。
+
 ## [1.2.2] - 2026-09-22
 
 本版本基于一次全量代码审查（详见 `代码审查报告.md`），修复 4 个高危、8 个中危缺陷。
@@ -136,7 +156,9 @@
   直接使用 Arch 官方 ISO 即可，无需本项目。
 - Parallels Tools 官方不支持 Arch，属社区级支持。
 
-[Unreleased]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.2...v1.3.0
+[1.2.2]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/AyaseEli-Bing/Mac-Arch-Installer/compare/v1.0.0...v1.1.0
