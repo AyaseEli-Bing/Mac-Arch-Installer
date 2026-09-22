@@ -6,6 +6,9 @@
 #   bash arch-install/release.sh 1.2.0              # 自动生成发布说明
 #   bash arch-install/release.sh 1.2.0 notes.md     # 使用指定说明文件
 #
+# 可选覆盖（网络不稳的环境有用）:
+#   RETRY_MAX=8 RETRY_WAIT=10 bash arch-install/release.sh 1.2.0
+#
 # 流程: 前置检查 → 语法校验 → 打 tag → 打包 → 推送 → 建 Release → 验证
 # ============================================================
 set -o pipefail
@@ -22,6 +25,37 @@ warn() { printf '  %b[WARN]%b %s\n' "$Y" "$N" "$1"; }
 err()  { printf '  %b[FAIL]%b %s\n' "$R" "$N" "$1"; }
 step() { printf '\n%b== %s ==%b\n' "$B" "$1" "$N"; }
 die()  { err "$1"; exit 1; }
+
+# ---------- 网络动作统一入口 ----------
+# 推送与建 Release 的动作此前都是 >/dev/null 2>&1 一把梭且无重试：失败时只剩一句
+# 自拟结论，真实原因（代理抖动、DNS、鉴权）全被吞掉。实测在 fake-IP 代理间歇断连时
+# 会让发版中途随机失败且无从排查。这里统一带重试，并在最终失败时打印真实报错。
+RETRY_MAX="${RETRY_MAX:-5}"
+RETRY_WAIT="${RETRY_WAIT:-6}"
+run_net() {
+    local _out _rc _i _first
+    _rc=1
+    for _i in $(seq 1 "$RETRY_MAX"); do
+        _out=$("$@" 2>&1)
+        _rc=$?
+        if [ "$_rc" -eq 0 ]; then
+            return 0
+        fi
+        if [ "$_i" -lt "$RETRY_MAX" ]; then
+            _first=$(printf '%s' "$_out" | head -1)
+            if [ -n "$_first" ]; then
+                warn "第 $_i/$RETRY_MAX 次失败（rc=$_rc）：$_first"
+            else
+                warn "第 $_i/$RETRY_MAX 次失败（rc=$_rc，无输出）"
+            fi
+            warn "${RETRY_WAIT}s 后重试…"
+            sleep "$RETRY_WAIT"
+        fi
+    done
+    err "重试 $RETRY_MAX 次仍失败，真实报错如下："
+    printf '%s\n' "$_out" | sed 's/^/         /' | head -8
+    return "$_rc"
+}
 
 # ---------- 参数校验 ----------
 if [ -z "$VERSION" ]; then
@@ -118,13 +152,19 @@ step "5/6 推送并创建 Release"
 # 分支必须先推成功：否则会出现「分支未推送但 Release 已创建」的不一致状态，
 # 别人 clone 不到与发布对应的提交。
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$CUR_BRANCH" 2>/dev/null || echo none)" ]; then
-    git push origin "$CUR_BRANCH" >/dev/null 2>&1 || die "分支推送失败（远端与本地不一致）"
-    ok "分支已推送"
+    if run_net git push origin "$CUR_BRANCH"; then
+        ok "分支已推送"
+    else
+        die "分支推送失败（真实报错见上方）"
+    fi
 else
     ok "分支已是最新"
 fi
-git push origin "$TAG" >/dev/null 2>&1 || die "标签推送失败"
-ok "标签已推送"
+if run_net git push origin "$TAG"; then
+    ok "标签已推送"
+else
+    die "标签推送失败（真实报错见上方）"
+fi
 
 if [ -n "$NOTES_IN" ] && [ -f "$NOTES_IN" ]; then
     NOTES_FILE="$NOTES_IN"
@@ -155,12 +195,12 @@ else
     ok "已自动生成发布说明"
 fi
 
-if "$GH" release create "$TAG" --repo "$REPO_SLUG" \
+if run_net "$GH" release create "$TAG" --repo "$REPO_SLUG" \
         --title "$TAG" --notes-file "$NOTES_FILE" --latest \
-        "$TARBALL" "$ZIPFILE" >/dev/null 2>&1; then
+        "$TARBALL" "$ZIPFILE"; then
     ok "Release 创建成功并已上传附件"
 else
-    die "Release 创建失败（请检查 gh 权限或网络）"
+    die "Release 创建失败（真实报错见上方）"
 fi
 
 # ---------- 6. 验证 ----------
@@ -169,11 +209,17 @@ RELEASE_URL="https://github.com/$REPO_SLUG/releases/tag/$TAG"
 printf '         发布页: %s\n' "$RELEASE_URL"
 for f in "$PREFIX.tar.gz" "$PREFIX.zip"; do
     DL_URL="https://github.com/$REPO_SLUG/releases/download/$TAG/$f"
-    CODE=$(curl -sIL -m 30 -o /dev/null -w '%{http_code}' "$DL_URL" 2>/dev/null)
+    CODE=""
+    # 附件上传与 CDN 生效有延迟，且本机代理会间歇断连，故带重试
+    for _v in 1 2 3; do
+        CODE=$(curl -sIL -m 30 -o /dev/null -w '%{http_code}' "$DL_URL" 2>/dev/null)
+        [ "$CODE" = "200" ] && break
+        sleep 4
+    done
     if [ "$CODE" = "200" ]; then
         ok "下载可用（HTTP 200）: $f"
     else
-        warn "下载返回 HTTP $CODE: $f"
+        warn "下载返回 HTTP ${CODE:-无响应}: $f（附件可能仍在上传或 CDN 未就绪，稍后手动确认）"
     fi
 done
 printf '         标签指向: %s\n' "$(git rev-parse --short "$TAG^{commit}")"
