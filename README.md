@@ -280,6 +280,11 @@ cat arch-install/log.txt          # 带时间戳的完整记录
 cat arch-install/access.log       # 请求来源（确认来自虚拟机而非本机）
 ```
 
+每条记录带 `run= stage= seq= dt=` 四个字段：`run` 区分多次尝试（重装不再覆盖上一次记录），
+`stage` 区分 live 与 chroot 两阶段，`seq` 是阶段内序号，`dt` 是距上一条的秒数。
+收尾的 `[99] RUN SUMMARY` 会给出 `lost=` —— 有多少条没能送达宿主机。
+宿主机掉线时日志也不会丢：完整留底同时写在新系统的 `/root/install-<run>-*.log`。
+
 ### SSH 公钥免密登录
 
 **宿主机**先发布公钥：

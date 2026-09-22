@@ -5,6 +5,7 @@
 import http.server
 import socketserver
 import os
+import re
 import threading
 import datetime
 
@@ -17,6 +18,12 @@ BIND_PORT = 8000
 RESET_FILE = os.path.join(BASE, "reset-password.sh")
 KEY_FILE = os.path.join(BASE, "sshkey.pub")
 MAX_BODY = 1_048_576      # 1 MB：日志回传远小于此，超出即视为异常请求
+
+RUN_RE = re.compile(rb"run=(\S+)")
+# 保留宿主机自己的时间戳：虚拟机时钟可能不准（实测挂起恢复后会停在挂起那一刻），
+# 宿主侧时间是独立于客户机的一路旁证。
+_log_lock = threading.Lock()
+_last_run = {"id": None}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -76,9 +83,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         if self.path.split("?")[0].rstrip("/") == "/log":
             ts = datetime.datetime.now().strftime("%H:%M:%S")
+            m = RUN_RE.search(body)
+            run_id = m.group(1).decode("utf-8", "replace") if m else None
             try:
-                with open(LOGFILE, "ab") as f:
-                    f.write(("[%s] " % ts).encode() + body + b"\n")
+                with _log_lock:
+                    chunks = []
+                    # 换一次安装就插一条分隔行：重装不再覆盖上一次的记录，
+                    # 两次尝试的日志能并存对比（此前重启服务即销毁证据）
+                    if run_id and run_id != _last_run["id"]:
+                        chunks.append(("\n---- run %s ----\n" % run_id).encode())
+                        _last_run["id"] = run_id
+                    chunks.append(("[%s] " % ts).encode() + body + b"\n")
+                    with open(LOGFILE, "ab") as f:
+                        f.write(b"".join(chunks))
             except OSError:
                 pass
             self._send(200, b"ok")
@@ -96,8 +113,9 @@ class Server(socketserver.ThreadingTCPServer):
 
 
 if __name__ == "__main__":
-    if os.path.exists(LOGFILE):
-        os.remove(LOGFILE)
+    # 刻意不在启动时删除 log.txt：安装失败后重启服务是常见动作，
+    # 原先这一步会把上一次尝试的记录一并抹掉，事后无从对比两次尝试。
+    # 运行边界改由每个 run= 字段对应的分隔行标示。
     threads = []
     for host in BIND_HOSTS:
         try:

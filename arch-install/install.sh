@@ -70,11 +70,58 @@ else
 fi
 HOST_URL="http://$HOST_IP:8000"
 
-# 日志函数：同时打印到屏幕并回传宿主机
+# ---------- 结构化日志核心 ----------
+# 消息文本原样保留（文档与验收以 "[15] ALL DONE" 等字面量为准），
+# 结构化字段以键值前缀附加，grep 行为不受影响。
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
+LOG_STAGE="live"
+LOG_SEQ=0
+LOG_LOST=0
+LOG_T0=$(date +%s)
+LOG_LOCAL="/tmp/install-$RUN_ID.log"
+LOG_LAST=""
+CHROOT_STATS=""
+
+# 一条记录同时做三件事：打印到屏幕、本地留底、POST 给宿主机。
+# POST 失败必须计数 —— 此前失败被 >/dev/null 2>&1 静默吞掉，宿主机一旦掉线，
+# 一次中断的安装留下的就是被腰斩的日志，而文件本身不显示缺了什么。
 r() {
+    local _now _dt _line
+    LOG_SEQ=$((LOG_SEQ + 1))
+    _now=$(date +%s)
+    _dt="-"
+    [ -n "$LOG_LAST" ] && _dt="$((_now - LOG_LAST))s"
+    LOG_LAST=$_now
+    _line="$(date '+%F %T') run=$RUN_ID stage=$LOG_STAGE seq=$LOG_SEQ dt=$_dt $1"
     echo "[arch] $1"
-    curl -s -m 10 -X POST -d "$1" "$HOST_URL/log" >/dev/null 2>&1
+    printf '%s\n' "$_line" >> "$LOG_LOCAL"
+    # --data-raw 而非 --data：消息若以 @ 开头会被 curl 当成文件名去读取
+    if ! curl -s -m 10 -X POST --data-raw "$_line" "$HOST_URL/log" >/dev/null 2>&1; then
+        LOG_LOST=$((LOG_LOST + 1))
+    fi
 }
+
+# 收尾摘要挂在 EXIT trap 上：失败出口散落在十几个 [FATAL] 分支里，
+# 逐个补打印既容易漏，也会在后来新增分支时静默失配。
+log_summary() {
+    local _rc _elapsed
+    _rc=$?
+    _elapsed=$(( $(date +%s) - LOG_T0 ))
+    # steps 取的是「摘要之前的业务记录条数」：参数在进入 r() 前就已展开，
+    # 故不含摘要自身那一行。字段名用 steps 而非 events，避免与行内 seq= 混读。
+    # 阶段信息已由行首元字段 stage= 承载，消息里不再重复写死，以免两处不一致。
+    r "[99] RUN SUMMARY rc=$_rc steps=$LOG_SEQ lost=$LOG_LOST elapsed=${_elapsed}s${CHROOT_STATS} log=$LOG_LOCAL"
+    # live 阶段的 /tmp 在 RAM 盘上，重启即蒸发；目标系统已挂载时把日志留一份过去。
+    # 先写摘要再拷贝，故副本里不含摘要这一行本身。
+    if mountpoint -q /mnt 2>/dev/null && [ -d /mnt/root ]; then
+        cp "$LOG_LOCAL" "/mnt/root/install-$RUN_ID-live.log" 2>/dev/null && \
+            echo "[arch] 日志已留存到新系统：/root/install-$RUN_ID-live.log"
+    fi
+    if [ "$LOG_LOST" -gt 0 ]; then
+        echo "[arch][WARN] 有 $LOG_LOST 条日志未送达宿主机，完整记录留在 $LOG_LOCAL"
+    fi
+}
+trap log_summary EXIT
 
 # ---------- 镜像源：候选清单 / 探活 / 择优写入 ----------
 # 候选地址只在这里定义一次。原实现在 step 6 与 chroot 脚本里各写一份同样的
@@ -397,12 +444,16 @@ NEW_MIRROR_CN='$NEW_MIRROR_CN'
 VARS
 chmod 600 /mnt/root/.install-vars
 
-cat > /mnt/root/config.sh <<'CHROOT'
-#!/bin/bash
-set -o pipefail
-HOST_URL=$(cat /root/.host_url 2>/dev/null || echo "http://10.211.55.2:8000")
-r() { echo "[arch] $1"; curl -s -m 10 -X POST -d "$1" "$HOST_URL/log" >/dev/null 2>&1; }
-
+# config.sh = 注入的日志核心 + 下方固定脚本体。
+# r() 只在本文件顶部定义一次，这里用 declare -f 原样搬过去：此前此处是手抄的
+# 第二份定义，改一份漏一份，正是本仓库反复踩过的「同一逻辑两处实现」问题。
+{
+    printf '#!/bin/bash\nset -o pipefail\n'
+    printf 'HOST_URL=$(cat /root/.host_url 2>/dev/null || echo "http://%s:8000")\n' "$HOST_IP"
+    printf 'RUN_ID=%s\nLOG_STAGE=chroot\nLOG_SEQ=0\nLOG_LOST=0\nLOG_T0=%s\nLOG_LOCAL=%s\nLOG_LAST=\n' \
+        "'$RUN_ID'" "'$(date +%s)'" "'/root/install-$RUN_ID-chroot.log'"
+    declare -f r
+    cat <<'CHROOT'
 # 加载安装配置
 # shellcheck source=/dev/null
 . /root/.install-vars
@@ -508,7 +559,10 @@ IM
 fi
 
 r "[12] chroot configuration COMPLETE"
+# 把本阶段的计数回传给 live 阶段，供收尾摘要合并（写在最后一次 r 之后才是终值）
+printf ' chroot_events=%s chroot_lost=%s' "$LOG_SEQ" "$LOG_LOST" > /root/.install-stats
 CHROOT
+} > /mnt/root/config.sh
 chmod +x /mnt/root/config.sh
 echo "$HOST_URL" > /mnt/root/.host_url
 r "[10] chroot config script written"
@@ -517,15 +571,20 @@ r "[10] chroot config script written"
 # 管道会让 $? 取到 tail 的退出码（恒为 0），必须用 PIPESTATUS[0] 才能拿到 chroot 的真实结果
 arch-chroot /mnt /bin/bash /root/config.sh 2>&1 | tail -5
 CH_RC=${PIPESTATUS[0]}
+if [ -f /mnt/root/.install-stats ]; then
+    CHROOT_STATS=$(tr -d '\n' < /mnt/root/.install-stats)
+else
+    r "[13][WARN] 未收到 chroot 阶段的日志计数，该阶段记录可能不完整"
+fi
 if [ "$CH_RC" -ne 0 ]; then
     r "[13][FATAL] chroot 配置失败（rc=$CH_RC），系统可能无法启动。中止。"
     exit 1
 fi
-r "[13] chroot 配置完成（rc=0）"
+r "[13] chroot 配置完成（rc=0）$CHROOT_STATS"
 
 # ---------- 12. 收尾检查 ----------
 r "[14] boot files: $(ls /mnt/boot/ 2>/dev/null | tr '\n' ' ')"
 r "[14] entry: $(cat /mnt/boot/loader/entries/arch.conf 2>/dev/null | tr '\n' ' | ')"
 # 清理安装期临时文件（.install-vars 含明文密码，必须一并删除）
-rm -f /mnt/root/config.sh /mnt/root/.install-vars /mnt/root/.host_url
+rm -f /mnt/root/config.sh /mnt/root/.install-vars /mnt/root/.host_url /mnt/root/.install-stats
 r "[15] ALL DONE - you may reboot now (remember to disconnect the ISO)"
