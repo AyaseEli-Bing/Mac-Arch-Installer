@@ -12,7 +12,17 @@
 #
 # 注意：本脚本不硬编码任何密码，必须由使用者提供。
 # ============================================================
-HOST="http://10.211.55.2:8000"
+# 宿主机地址：优先由环境变量指定，否则自动探测（与 install.sh 保持一致）
+if [ -z "${HOST:-}" ]; then
+    HOST=""
+    for _ip in 10.211.55.2 10.37.129.2; do
+        if curl -s -m 3 "http://$_ip:8000/ping" 2>/dev/null | grep -q "ok"; then
+            HOST="http://$_ip:8000"
+            break
+        fi
+    done
+    [ -z "$HOST" ] && HOST="http://10.211.55.2:8000"
+fi
 
 r() {
     echo "[reset] $1"
@@ -68,15 +78,30 @@ mount --bind /proc /mnt/proc 2>/dev/null
 mount --bind /sys  /mnt/sys  2>/dev/null
 
 # 重置 arch 与 root 的密码
-OUT=$(arch-chroot /mnt /bin/bash -c "echo 'arch:${NEWPW}' | chpasswd && echo 'root:${NEWPW}' | chpasswd && echo OK" 2>&1)
-r "chpasswd 结果: $(echo "$OUT" | tr '\n' ' ')"
+# 安全要点：密码经 stdin 传给 chpasswd，绝不进入命令行参数。
+# 若写成 `bash -c "echo 'arch:${NEWPW}' | chpasswd"`，会有两个后果：
+#   ① 命令执行期间密码出现在 ps / /proc/*/cmdline 中，明文可读；
+#   ② 密码含单引号时引号结构被破坏，构成命令注入。
+CHOUT=$(printf 'arch:%s\nroot:%s\n' "$NEWPW" "$NEWPW" | arch-chroot /mnt chpasswd 2>&1)
+CH_RC=$?
+r "chpasswd rc=$CH_RC 输出: $(printf '%s' "$CHOUT" | tr '\n' ' ')"
 
 # 顺带解锁账号（若曾被锁定）
 arch-chroot /mnt /bin/bash -c "passwd -u arch 2>/dev/null; passwd -u root 2>/dev/null" >/dev/null 2>&1
 
-# 验证
-VERIFY=$(arch-chroot /mnt /bin/bash -c "passwd -S arch" 2>&1)
+# 验证（passwd -S 的第二个字段：P=已设密码，L=锁定，NP=无密码）
+VERIFY=$(arch-chroot /mnt passwd -S arch 2>&1)
 r "账号状态: $VERIFY"
+case "$VERIFY" in
+    *"arch P "*)
+        r "[OK] 密码已生效"
+        ;;
+    *)
+        r "[FATAL] 密码未生效（状态: $VERIFY）—— 请检查根分区是否可写"
+        umount -R /mnt 2>/dev/null
+        exit 1
+        ;;
+esac
 
 # 卸载
 umount -R /mnt 2>/dev/null

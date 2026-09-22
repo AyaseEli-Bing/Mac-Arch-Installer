@@ -87,7 +87,7 @@ fi
 # ---------- 3. 虚拟机状态 ----------
 echo ""
 echo "[3/4] 虚拟机状态"
-if "$PRL" list -a 2>/dev/null | grep -q "$VM"; then
+if "$PRL" list -a 2>/dev/null | grep -qF "$VM"; then
     ok "虚拟机 '$VM' 存在"
     STATE=$("$PRL" list -i "$VM" 2>/dev/null | grep -m1 '^State:' | awk '{print $2}')
     echo "       当前状态: ${STATE:-未知}"
@@ -105,7 +105,15 @@ fi
 # ---------- 4. 分发服务 ----------
 echo ""
 echo "[4/4] 分发服务"
-BOUND=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | grep -c LISTEN)
+# 优先用 lsof 判断（macOS 自带）；若环境未提供则回退到 nc 探测，
+# 避免把「探测工具缺失」误判成「端口未监听」
+if command -v lsof >/dev/null 2>&1; then
+    BOUND=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | grep -c LISTEN)
+elif nc -z -G 1 127.0.0.1 "$PORT" >/dev/null 2>&1; then
+    BOUND=1
+else
+    BOUND=0
+fi
 if [ "$BOUND" -gt 0 ]; then
     ok "端口 $PORT 已监听（$BOUND 个地址）"
     for ip in 10.211.55.2 10.37.129.2; do

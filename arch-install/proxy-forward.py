@@ -10,20 +10,31 @@
 
 仅绑定 Parallels 虚拟网段，不暴露到 WiFi / 局域网。
 """
+import os
 import socket
 import threading
 import sys
+import time
 
-LISTEN_HOST = "10.211.55.2"     # Parallels Shared 网段上宿主机的地址
-LISTEN_PORT = 8888
-TARGET_HOST = "127.0.0.1"        # 宿主机本地 HTTP 代理
-TARGET_PORT = 53551
+# 参数均可用环境变量覆盖，便于测试与适配不同环境
+LISTEN_HOST = os.environ.get("FORWARD_LISTEN_HOST", "10.211.55.2")
+LISTEN_PORT = int(os.environ.get("FORWARD_LISTEN_PORT", "8888"))
+TARGET_HOST = os.environ.get("FORWARD_TARGET_HOST", "127.0.0.1")
+TARGET_PORT = int(os.environ.get("FORWARD_TARGET_PORT", "53551"))
 
 BUF = 65536
+CONNECT_TIMEOUT = 15      # 仅作用于「建立连接」阶段，连接后必须清除
+MAX_CONNECTIONS = 128     # 并发上限，防止连接耗尽线程与文件描述符
+SEM = threading.Semaphore(MAX_CONNECTIONS)
 
 
 def pipe(src, dst):
-    """单向转发，任一端关闭则同时关闭两端。"""
+    """单向转发。
+
+    读到 EOF 时只对目标方向做「半关闭」（SHUT_WR），而非直接关闭两个 socket。
+    原因：HTTP 隧道允许单向先行结束，此时反方向可能仍有数据在传；
+    若在此处直接 close()，会截断尚未传完的响应。
+    """
     try:
         while True:
             data = src.recv(BUF)
@@ -33,29 +44,46 @@ def pipe(src, dst):
     except OSError:
         pass
     finally:
-        for s in (src, dst):
-            try:
-                s.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            try:
-                s.close()
-            except OSError:
-                pass
+        try:
+            dst.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        try:
+            src.close()
+        except OSError:
+            pass
 
 
 def handle(client, peer):
     try:
-        upstream = socket.create_connection((TARGET_HOST, TARGET_PORT), timeout=15)
+        upstream = socket.create_connection((TARGET_HOST, TARGET_PORT), timeout=CONNECT_TIMEOUT)
+        # 关键修复：create_connection 的 timeout 会保留在 socket 上。
+        # 若不清除，后续 recv() 在空闲超过 CONNECT_TIMEOUT 后会抛 TimeoutError，
+        # 而它是 OSError 的子类，会被 pipe() 的 except OSError 静默吞掉并断连——
+        # 表现为「隧道空闲十几秒后莫名中断」。故连接建立后必须置回阻塞模式。
+        upstream.settimeout(None)
     except OSError as exc:
-        print("connect upstream failed: %s" % exc, flush=True)
+        print("connect upstream failed from %s: %s" % (peer[0], exc), flush=True)
         try:
             client.close()
         except OSError:
             pass
         return
-    threading.Thread(target=pipe, args=(client, upstream), daemon=True).start()
-    threading.Thread(target=pipe, args=(upstream, client), daemon=True).start()
+    t1 = threading.Thread(target=pipe, args=(client, upstream), daemon=True)
+    t2 = threading.Thread(target=pipe, args=(upstream, client), daemon=True)
+    t1.start()
+    t2.start()
+    # 必须等待双向转发都结束再返回，否则并发计数会在连接仍存活时被提前释放
+    t1.join()
+    t2.join()
+
+
+def _serve_client(client, peer):
+    """带并发上限的包装：无论处理过程如何结束，都必须释放信号量。"""
+    try:
+        handle(client, peer)
+    finally:
+        SEM.release()
 
 
 def main():
@@ -71,9 +99,15 @@ def main():
     while True:
         try:
             client, peer = srv.accept()
-        except OSError:
+        except InterruptedError:
             continue
-        threading.Thread(target=handle, args=(client, peer), daemon=True).start()
+        except OSError as exc:
+            # 区分瞬时错误与致命错误：无条件 continue 会在 fd 失效时形成忙等循环（CPU 占满）
+            print("accept failed: %s" % exc, flush=True)
+            time.sleep(0.5)
+            continue
+        SEM.acquire()
+        threading.Thread(target=_serve_client, args=(client, peer), daemon=True).start()
 
 
 if __name__ == "__main__":

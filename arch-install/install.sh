@@ -25,13 +25,23 @@ NEW_MIRROR_CN="yes"             # 优先使用国内镜像: yes | no
 NEW_EXTRA_PKGS=""               # 额外软件包（空格分隔）
 
 # ---------- 加载外部配置 ----------
+# 安全提示：配置文件以 root 权限被 source，因此必须先校验属主与写权限。
+# 若可被非特权用户改写，则等价于本地提权。
 for _conf in /root/install.conf /etc/install.conf; do
-    if [ -f "$_conf" ]; then
-        # shellcheck source=/dev/null
-        if . "$_conf"; then
-            echo "[arch] config loaded: $_conf"
-            break
-        fi
+    [ -f "$_conf" ] || continue
+    _owner=$(stat -c %U "$_conf" 2>/dev/null || stat -f %Su "$_conf" 2>/dev/null || echo "unknown")
+    if [ "$_owner" != "root" ]; then
+        echo "[arch][WARN] 跳过 $_conf：属主为 $_owner（必须为 root）"
+        continue
+    fi
+    if [ -n "$(find "$_conf" -perm -0002 2>/dev/null)" ]; then
+        echo "[arch][WARN] 跳过 $_conf：文件可被其他用户写入"
+        continue
+    fi
+    # shellcheck source=/dev/null
+    if . "$_conf"; then
+        echo "[arch] config loaded: $_conf"
+        break
     fi
 done
 
@@ -52,9 +62,13 @@ for ip in 10.211.55.2 10.37.129.2; do
         break
     fi
 done
-[ -z "$HOST_IP" ] && HOST_IP="10.211.55.2"
+if [ -z "$HOST_IP" ]; then
+    HOST_IP="10.211.55.2"
+    echo "[arch][WARN] 未探测到宿主机（两个网段均无响应），日志回传可能不可用"
+else
+    echo "[arch] host detected at $HOST_IP"
+fi
 HOST_URL="http://$HOST_IP:8000"
-echo "[arch] host detected at $HOST_IP"
 
 # 日志函数：同时打印到屏幕并回传宿主机
 r() {
@@ -82,6 +96,13 @@ r "[1] ntp synced: $(date '+%F %T')"
 
 # ---------- 2. 确定目标磁盘 ----------
 if [ -n "$NEW_DISK" ] && [ -b "$NEW_DISK" ]; then
+    # 拒绝光驱 / 回环等非磁盘设备，避免配置写错时误格式化
+    case "$NEW_DISK" in
+        *rom*|*loop*|*sr[0-9]*)
+            r "[2][FATAL] 拒绝使用非磁盘设备：$NEW_DISK"
+            exit 1
+            ;;
+    esac
     DISK="$NEW_DISK"
     r "[2] target disk = $DISK  ($(lsblk -ndo SIZE "$DISK" 2>/dev/null)) [from install.conf]"
 else
@@ -121,7 +142,9 @@ for c in sgdisk parted sfdisk fdisk cfdisk gdisk wipefs mkfs.ext4 mkfs.fat mkfs.
 done
 r "[3] available tools:$TOOLS"
 
-# 抹掉旧分区表（GPT 主表 + 备份表）与残留文件系统签名
+# 抹掉磁盘头部的主分区表与残留文件系统签名
+# 注意：dd 仅覆盖磁盘开头 32MB（GPT 备份表位于磁盘末尾），
+#      备份表由后续分区工具的 -Z / mklabel 处理
 dd if=/dev/zero of="$DISK" bs=1M count=32 conv=notrunc >/dev/null 2>&1
 command -v wipefs >/dev/null 2>&1 && wipefs -a "$DISK" >/dev/null 2>&1
 
@@ -259,9 +282,12 @@ if [ -n "$NEW_EXTRA_PKGS" ]; then
 fi
 
 r "[8] pacstrap START (this takes a while)"
+# 关闭路径名展开：避免当前目录下的同名文件被误当作包名参数
+set -f
 # shellcheck disable=SC2086
 pacstrap /mnt $PKGS 2>&1 | tee /tmp/pacstrap.log
 PS_RC=${PIPESTATUS[0]}
+set +f
 r "[8] pacstrap END rc=$PS_RC  size=$(du -sh /mnt 2>/dev/null | awk '{print $1}')"
 if [ $PS_RC -ne 0 ]; then
     r "[8][ERROR] last lines: $(tail -5 /tmp/pacstrap.log | tr '\n' ' ')"
@@ -421,11 +447,18 @@ echo "$HOST_URL" > /mnt/root/.host_url
 r "[10] chroot config script written"
 
 # ---------- 11. 执行 chroot 配置 ----------
+# 管道会让 $? 取到 tail 的退出码（恒为 0），必须用 PIPESTATUS[0] 才能拿到 chroot 的真实结果
 arch-chroot /mnt /bin/bash /root/config.sh 2>&1 | tail -5
-r "[13] chroot execution finished"
+CH_RC=${PIPESTATUS[0]}
+if [ "$CH_RC" -ne 0 ]; then
+    r "[13][FATAL] chroot 配置失败（rc=$CH_RC），系统可能无法启动。中止。"
+    exit 1
+fi
+r "[13] chroot 配置完成（rc=0）"
 
 # ---------- 12. 收尾检查 ----------
 r "[14] boot files: $(ls /mnt/boot/ 2>/dev/null | tr '\n' ' ')"
 r "[14] entry: $(cat /mnt/boot/loader/entries/arch.conf 2>/dev/null | tr '\n' ' | ')"
-rm -f /mnt/root/config.sh
+# 清理安装期临时文件（.install-vars 含明文密码，必须一并删除）
+rm -f /mnt/root/config.sh /mnt/root/.install-vars /mnt/root/.host_url
 r "[15] ALL DONE - you may reboot now (remember to disconnect the ISO)"

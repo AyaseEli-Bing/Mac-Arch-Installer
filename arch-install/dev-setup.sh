@@ -89,8 +89,10 @@ echo "[3/3] 包管理镜像源"
 if [ "$USE_CN_MIRROR" = "yes" ]; then
     if command -v go >/dev/null 2>&1; then
         go env -w GOPROXY=https://goproxy.cn,direct
-        go env -w GOSUMDB=sum.golang.org
-        ok "Go    → goproxy.cn"
+        # 官方 sum.golang.org 在国内常被墙：即便镜像配好，模块校验仍会超时失败。
+        # 指向 gosum.io 并通过 goproxy.cn 代理 sumdb 可避免这一情况。
+        go env -w GOSUMDB=gosum.io+https://goproxy.cn/sumdb/sum.golang.org
+        ok "Go    → goproxy.cn（含 sumdb 代理）"
     fi
     if command -v npm >/dev/null 2>&1; then
         npm config set registry https://registry.npmmirror.com >/dev/null 2>&1

@@ -20,6 +20,18 @@ else
 fi
 PASS=0; WARN=0; FAIL=0
 pass() { printf '  %b[OK]%b   %s\n' "$G" "$N" "$1"; PASS=$((PASS + 1)); }
+
+# 端口监听探测：优先 lsof（macOS 自带），缺失时回退 nc，
+# 避免把「探测工具缺失」误判为「端口未监听」
+port_listening() {
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+    elif command -v nc >/dev/null 2>&1; then
+        nc -z -G 1 127.0.0.1 "$1" >/dev/null 2>&1
+    else
+        return 1
+    fi
+}
 warn() { printf '  %b[WARN]%b %s\n' "$Y" "$N" "$1"; WARN=$((WARN + 1)); }
 fail() { printf '  %b[FAIL]%b %s\n' "$R" "$N" "$1"; FAIL=$((FAIL + 1)); }
 fix()  { printf '         修复: %s\n' "$1"; }
@@ -42,7 +54,7 @@ fi
 
 # ---------- 2. 虚拟机存在性 ----------
 sec "虚拟机"
-if ! "$PRL" list -a 2>/dev/null | grep -q "$VM"; then
+if ! "$PRL" list -a 2>/dev/null | grep -qF "$VM"; then
     fail "虚拟机 '$VM' 不存在"
     fix "\"$PRL\" create \"$VM\" -d manjaro --dst \"\$HOME/Parallels\""
     echo ""
@@ -81,7 +93,7 @@ esac
 
 # ---------- 5. 安装镜像 ----------
 sec "安装镜像"
-ISO_FOUND=$(ls "$HOME/Downloads"/archboot-*-aarch64-ARCH-aarch64.iso 2>/dev/null | tail -1)
+ISO_FOUND=$(ls -t "$HOME/Downloads"/archboot-*-aarch64-ARCH-aarch64.iso 2>/dev/null | head -1)
 if [ -n "$ISO_FOUND" ]; then
     pass "ISO 存在: $(basename "$ISO_FOUND")"
     printf '         大小: %s\n' "$(ls -lh "$ISO_FOUND" | awk '{print $5}')"
@@ -94,7 +106,7 @@ fi
 
 # ---------- 6. 分发服务 ----------
 sec "分发服务（安装期需要）"
-if lsof -nP -iTCP:$PORT_SERVE -sTCP:LISTEN >/dev/null 2>&1; then
+if port_listening "$PORT_SERVE"; then
     pass "端口 $PORT_SERVE 已监听"
     for ip in "$HOST_SHARED" "$HOST_HOSTONLY"; do
         if [ "$(curl -s -m 3 "http://$ip:$PORT_SERVE/ping" 2>/dev/null)" = "ok" ]; then
@@ -110,7 +122,7 @@ fi
 
 # ---------- 7. 代理转发（GitHub 访问） ----------
 sec "代理转发（GitHub 加速）"
-if lsof -nP -iTCP:$PORT_PROXY -sTCP:LISTEN >/dev/null 2>&1; then
+if port_listening "$PORT_PROXY"; then
     pass "端口 $PORT_PROXY 已监听"
     printf '         说明: 宿主机自身走独立代理，实际效果须在虚拟机内验证（见下）\n'
 else
@@ -159,7 +171,7 @@ if [ -n "$VMIP" ]; then
             warn "共享文件夹为空（检查 Parallels 的 配置 → 共享 → 共享文件夹）"
             fix "在 Parallels 界面为 '$VM' 添加共享文件夹（CLI 仅支持总开关，具体目录需图形界面配置）"
         fi
-        if lsof -nP -iTCP:$PORT_PROXY -sTCP:LISTEN >/dev/null 2>&1; then
+        if port_listening "$PORT_PROXY"; then
             GH_CODE=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
                       "arch@$VMIP" "curl -s -m 12 -x http://$HOST_SHARED:$PORT_PROXY -o /dev/null -w '%{http_code}' https://github.com" 2>/dev/null | tr -d ' ')
             if [ "$GH_CODE" = "200" ]; then

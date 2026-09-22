@@ -7,6 +7,50 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-09-22
+
+本版本基于一次全量代码审查（详见 `代码审查报告.md`），修复 4 个高危、8 个中危缺陷。
+**其中 4 个高危项均无法被 `shellcheck` / `bash -n` / `py_compile` 发现**——
+它们属于「逻辑正确但语义有偏」，详见报告的「审查方法说明」。
+
+### 修复 · 高危（凭据泄露与错误掩盖）
+
+- **`install.sh`**：收尾时一并删除 `.install-vars` 与 `.host_url`。
+  此前只删了 `config.sh`，导致**明文密码残留**在新系统的 `/root/.install-vars`。
+- **`install.sh`**：用 `${PIPESTATUS[0]}` 捕获 `arch-chroot` 的真实退出码。
+  此前 `| tail -5` 使 `$?` 取到 `tail` 的 0，chroot 配置失败时仍输出 `ALL DONE`。
+- **`reset-password.sh`**：密码改为经 stdin 传给 `chpasswd`，不再拼进 `bash -c` 参数。
+  此前密码会出现在 `ps` / `/proc/*/cmdline` 中；且密码含单引号时引号结构被破坏，构成命令注入。
+- **`proxy-forward.py`**：连接建立后清除 socket 超时（`settimeout(None)`）。
+  此前 `create_connection(timeout=15)` 的超时会保留在 socket 上，
+  导致**空闲超过 15 秒的连接被静默断开**（经实测确认，修复后空闲 18 秒正常）。
+
+### 修复 · 中危
+
+- **`serve.py`**：限制请求体长度（1 MB），超限返回 413；`Content-Length` 非法值不再抛异常。
+- **`serve.py`**：路由改为精确匹配，未知路径返回 404
+  （此前 `/key` 会命中 `/k`，且任意路径的 POST 都返回 200）。
+- **`proxy-forward.py`**：`accept()` 异常时区分瞬时与致命错误并退避，避免忙等循环；
+  新增并发连接上限（128）。
+- **`diagnose.sh`**：ISO 探测改为按时间取最新，与 `check.sh` 一致
+  （此前按字母序，两脚本可能报告不同文件，导致结论互相矛盾）。
+- **`release.sh`**：分支推送失败改为阻断发版，避免「分支未推送但 Release 已创建」。
+- **`install.sh`**：加载配置文件前校验属主与写权限；校验目标磁盘非光驱/回环设备。
+
+### 修复 · 低危与健壮性
+
+- **`check.sh` / `diagnose.sh`**：`grep -qF` 避免虚拟机名被当作正则；
+  端口探测在 `lsof` 缺失时回退到 `nc`，避免把「工具缺失」误判为「未监听」。
+- **`proxy-forward.py`**：转发结束改为半关闭（`SHUT_WR`），避免截断未传完的响应；
+  参数支持环境变量覆盖，便于测试与适配。
+- **`install.sh`**：宿主机探测失败时显式告警；`pacstrap` 前关闭路径名展开；修正 `dd` 注释。
+- **`reset-password.sh`**：校验 `passwd -S` 状态位，未生效则报错退出；宿主机地址支持自动探测。
+- **`dev-setup.sh`**：Go 校验库改用 `gosum.io` 并经 goproxy.cn 代理 sumdb。
+
+### 另含
+
+- 新增 `自检功能使用教程.md`；`check.sh` 可移植性修正（自动探测 Python 与 ISO）。
+
 ## [1.2.1] - 2026-09-22
 
 ### 修复

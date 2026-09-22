@@ -62,8 +62,10 @@ fi
 ok "标签 $TAG 未被占用"
 
 if [ -n "$(git status --porcelain)" ]; then
-    warn "工作区有未提交的变更，建议先提交"
+    warn "工作区有未提交的变更"
     git status --short | sed 's/^/         /'
+    printf '         注意：打包使用 git archive HEAD，只包含【已提交】内容，\n'
+    printf '               未提交的改动不会进入发布包。\n'
     printf '         是否继续？[y/N] '
     read -r ans
     [ "$ans" = "y" ] || [ "$ans" = "Y" ] || die "已取消"
@@ -113,7 +115,14 @@ printf '         包含文件: %s 个\n' "$(git ls-files | wc -l | tr -d ' ')"
 
 # ---------- 5. 推送并创建 Release ----------
 step "5/6 推送并创建 Release"
-git push origin "$CUR_BRANCH" >/dev/null 2>&1 || warn "分支推送跳过或失败（可能已是最新）"
+# 分支必须先推成功：否则会出现「分支未推送但 Release 已创建」的不一致状态，
+# 别人 clone 不到与发布对应的提交。
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$CUR_BRANCH" 2>/dev/null || echo none)" ]; then
+    git push origin "$CUR_BRANCH" >/dev/null 2>&1 || die "分支推送失败（远端与本地不一致）"
+    ok "分支已推送"
+else
+    ok "分支已是最新"
+fi
 git push origin "$TAG" >/dev/null 2>&1 || die "标签推送失败"
 ok "标签已推送"
 
