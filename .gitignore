@@ -28,6 +28,8 @@ sshkey.pub
 log.txt
 *.log
 access.log
+# 本地会话/协作日志：发布包由 git archive HEAD 生成，误提交会随 Release 外泄
+.sessions/
 
 # ============================================================
 # 依赖目录（各生态通用）
