@@ -535,6 +535,17 @@ Archboot 镜像**每日更新**，`install.sh` 中的 ISO 文件名与校验值�
 | **[CONTRIBUTING.md](CONTRIBUTING.md)** | 贡献指南、代码规范与发版流程 |
 | **[README.en.md](README.en.md)** | English introduction & usage guide |
 
+## 参与贡献
+
+欢迎 PR。**提 PR 之前请先开 issue 或在已有 issue 下留言认领**——避免两个人做同一条，也让维护者
+在你花几小时之前把方向纠正过来。
+
+- 规范、兼容性契约（宿主机 bash 3.2 / 虚拟机 aarch64）与提交前检查清单见
+  [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 想挑一个上手：看带 [`good first issue`](https://github.com/AyaseEli-Bing/Mac-Arch-Installer/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+  标签的 issue，每条都写明了具体文件、改法，以及**不需要 Parallels 和虚拟机就能自证**的验证命令。
+- 没有 Mac 虚拟机也能贡献：文档修订、中英 README 对齐、静态检查类改动都在可验收范围内。
+
 ## 许可证
 
 [MIT](LICENSE)

@@ -94,7 +94,12 @@ fi
 - **FAQ 不只写"怎么修"，还要写清根因与判别特征**——
   例如"能连宿主机但连不上外网 → 先查网卡是不是 `host` 类型"
 - 涉及命令的章节给出**可直接复制**的完整命令，避免省略关键参数
-- Markdown 需通过 `markdownlint`（CI 会检查）
+- Markdown 需通过 `markdownlint`。CI 用 `markdownlint-cli2` 检查**顶层** `*.md`
+  （配置见 `.markdownlint.json`，`*.md` 通配不含子目录）。本地等价命令：
+
+  ```bash
+  npx markdownlint-cli2 "*.md"
+  ```
 
 ---
 
@@ -103,17 +108,37 @@ fi
 提交前请确认：
 
 ```bash
-# 1. 语法检查
-for f in arch-install/*.sh; do bash -n "$f" || echo "FAIL: $f"; done
+# 1. 语法检查（注意：不要写成 `bash -n "$f" || echo FAIL`，那样脚本本身仍返回 0，
+#    等于永远"通过"。下面这版与 CI 一致，任一文件失败就整体失败。）
+fail=0
+for f in arch-install/*.sh; do bash -n "$f" || { echo "FAIL: $f"; fail=1; }; done
+exit "$fail"
 python3 -m py_compile arch-install/*.py
 
 # 2. 静态检查
 shellcheck -S warning arch-install/*.sh
 
-# 3. 端到端自检（宿主机侧）
+# 3. Markdown 检查
+npx markdownlint-cli2 "*.md"
+
+# 4. 端到端自检（宿主机侧，需要 Parallels 与已存在的虚拟机）
 bash arch-install/check.sh
 bash arch-install/diagnose.sh
 ```
+
+### 没有 Parallels / 没有虚拟机时怎么自证
+
+第 4 步需要真实环境，多数贡献者（以及任何 CI runner）拿不到。可离线完成的最小验证集是：
+
+```bash
+for f in arch-install/*.sh; do bash -n "$f" || exit 1; done   # 语法
+shellcheck -S warning arch-install/*.sh                        # 静态检查
+python3 -m py_compile arch-install/*.py                        # Python 语法
+bash arch-install/dev-setup.sh --help                          # 只读路径，不会装东西
+VM=Foo bash arch-install/diagnose.sh                           # 只读诊断，输出前 20 行
+```
+
+在 PR 里写清你跑了哪几条、以及**哪些部分因条件所限无法验证**——这比默默不提要好，维护者据此决定要不要替你跑实机。
 
 若改动涉及虚拟机内部逻辑，请在真实环境中验证，并在 PR 描述中说明验证方式与结果。
 
@@ -131,7 +156,7 @@ bash arch-install/diagnose.sh
 <可选正文：说明动机与影响>
 ```
 
-常用类型：`feat` / `fix` / `docs` / `refactor` / `chore` / `test`
+常用类型：`feat` / `fix` / `docs` / `refactor` / `chore` / `test` / `ci`
 
 示例：
 
@@ -156,6 +181,12 @@ bash arch-install/release.sh 1.2.0
 ```
 
 版本号遵循语义化版本：不兼容改动升 `MAJOR`，向下兼容的新功能升 `MINOR`，修 bug 升 `PATCH`。
+
+`release.sh` 的路径与重试参数都可覆盖，便于换机器或换仓库执行（默认值见脚本第 18-19、33-34 行）：
+
+```bash
+GH=/usr/local/bin/gh REPO_SLUG=other/owner RETRY_MAX=8 RETRY_WAIT=10 bash arch-install/release.sh 1.2.0
+```
 
 ---
 
