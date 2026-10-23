@@ -34,7 +34,9 @@ sec()  { printf '\n%b== %s ==%b\n' "$B" "$1" "$N"; }
 case "$MODE" in
     apply|check|export) ;;
     -h|--help|help)
-        sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'
+        # 帮助文本取自文件头注释，遇首个非注释行即停。
+        # 原按行号切片（sed -n '3,18p'），文件头增删一行就会把 set -o pipefail 漏进帮助。
+        awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
         exit 0
         ;;
     *)

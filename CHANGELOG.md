@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **`install.sh` 参数校验**：此前脚本完全不看参数，`bash install.sh --help` 会一路走到
+  分区与 `mkfs`。现在 `-h/--help` 打印文件头帮助并退出，其他参数报错退出，两者都发生在
+  source `install.conf` 与一切破坏性动作之前（issue #5）。
+- **`install.sh` 支持 `PORT`**：分发服务改端口时虚拟机侧不再只能按写死的 8000 探测，
+  chroot 阶段的兜底地址与探测逻辑共用同一端口值。
+- **`serve.py` 端口与绑定地址可覆盖**：`PORT` / `SERVE_HOSTS` 带默认值，非法值给出明确报错。
+  默认仍是 Parallels 两张虚拟网卡 + 8000；在非 Parallels 机器上
+  `SERVE_HOSTS=127.0.0.1 PORT=8765` 即可起服务做离线冒烟（issue #1）。
+- **`diagnose.sh` 认环境变量**：`VM` / `PRL` / `PORT` 均可覆盖，与 `check.sh` 对齐；
+  位置参数仅在 `VM` 未设置时兜底（issue #2）。
+- **`dev-setup.sh --help`**：帮助文本改为遇首个非注释行即停，不再把 `set -o pipefail`
+  当帮助打出来（issue #3）。
+- **`reset-password.sh`** 回传改用 `--data-raw`，与 `install.sh` 一致；**`check.sh`** 的
+  `nc` 回退补上 `command -v nc` 守卫（issue #5）。
+- **文档计数**：README 中英文统一为 5 组检查、去掉会随环境浮动的条目数；英文版补上
+  「安装配置」章节与 `PORT` / `SERVE_HOSTS` 用法（issue #4）。
+
 ## [1.4.0] - 2026-09-23
 
 ### 新增

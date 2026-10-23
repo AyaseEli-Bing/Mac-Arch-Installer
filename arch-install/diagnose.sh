@@ -4,11 +4,14 @@
 #
 # 逐条检测本项目实际踩过的坑，并给出可执行的修复建议。
 # 用法: bash diagnose.sh [虚拟机名称]      # 默认 "Arch Linux"
+#       VM="我的虚拟机" bash diagnose.sh   # 环境变量优先，位置参数兜底（与 check.sh 一致）
+#       PRL=/path/to/prlctl bash diagnose.sh
+#       PORT=8765 bash diagnose.sh         # 分发服务用了非默认端口时
 # ============================================================
 
-PRL="/Applications/Parallels Desktop.app/Contents/MacOS/prlctl"
-VM="${1:-Arch Linux}"
-PORT_SERVE=8000
+PRL="${PRL:-/Applications/Parallels Desktop.app/Contents/MacOS/prlctl}"
+VM="${VM:-${1:-Arch Linux}}"
+PORT_SERVE="${PORT:-8000}"
 PORT_PROXY=8888
 HOST_SHARED="10.211.55.2"
 HOST_HOSTONLY="10.37.129.2"

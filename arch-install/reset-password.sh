@@ -26,7 +26,8 @@ fi
 
 r() {
     echo "[reset] $1"
-    curl -s -m 10 -X POST -d "$1" "$HOST/log" >/dev/null 2>&1
+    # --data-raw 而非 --data：消息若以 @ 开头会被 curl 当成文件名去读取
+    curl -s -m 10 -X POST --data-raw "$1" "$HOST/log" >/dev/null 2>&1
 }
 
 # ---------- 获取新密码 ----------

@@ -22,6 +22,7 @@ Comes with environment self-check, live install logging, SSH key-based login, an
 - [Why This Project](#why-this-project)
 - [Project Structure](#project-structure)
 - [Requirements](#requirements)
+- [Install Configuration (optional)](#install-configuration-optional)
 - [Usage](#usage)
   - [Step 1 · Environment Self-Check](#step-1--environment-self-check-1-minute)
   - [Step 2 · Create the Virtual Machine](#step-2--create-the-virtual-machine-first-time-only)
@@ -97,6 +98,40 @@ curl -sL https://release.archboot.com/aarch64/latest/iso/ | grep -oE 'href="[^"]
 
 ---
 
+## Install Configuration (optional)
+
+`install.sh` can be customized through a config file — **no need to edit the script**.
+Copy `install.conf.example` to `/root/install.conf` and adjust it; without that file every
+value keeps its default and behavior is unchanged.
+
+**Configurable values**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `NEW_HOSTNAME` | `arch-vm` | Hostname |
+| `NEW_TIMEZONE` | `Asia/Shanghai` | Time zone |
+| `NEW_LOCALE` | `zh_CN.UTF-8` | System locale |
+| `NEW_KEYMAP` | `us` | Console keyboard layout |
+| `NEW_USER` / `NEW_USER_PW` | `arch` / `arch` | Regular user (⚠️ change the password after install) |
+| `NEW_ROOT_PW` | `arch` | root password (⚠️ change it after install) |
+| `NEW_DESKTOP` | `kde` | **Desktop environment**, see below |
+| `NEW_DISK` | empty | Target disk; empty = auto-detect the largest one (⚠️ all data on it is erased) |
+| `NEW_KERNEL` | `linux-aarch64` | Kernel package (required on ARM64; do not use `linux`) |
+| `NEW_CJK` | `yes` | Install CJK fonts and the fcitx5 input method |
+| `NEW_MIRROR_CN` | `yes` | Prefer mainland-China mirrors (Tsinghua / USTC) |
+| `NEW_EXTRA_PKGS` | empty | Extra packages, space-separated, e.g. `"firefox git htop"` |
+
+**Four desktop environments**
+
+| `NEW_DESKTOP` | Installs | Display manager |
+| --- | --- | --- |
+| `kde` | KDE Plasma | sddm |
+| `gnome` | GNOME | gdm |
+| `xfce` | XFCE | lightdm |
+| `none` | Command line only | none |
+
+---
+
 ## Usage
 
 ### Step 1 · Environment Self-Check (1 minute)
@@ -106,8 +141,11 @@ cd arch-install
 bash check.sh
 ```
 
-Verifies 11 items: host tools, ISO presence and SHA256, VM state and network adapter type,
-service listening status and script availability. Proceed only when everything is `[PASS]`.
+Runs five check groups: host tools, host resource headroom, ISO presence and SHA256,
+VM state and network adapter type, and distribution service availability.
+The exact number of items varies with your environment (e.g. the SHA256 check only runs
+when `EXPECT_SHA` is set), so treat the actual output as the source of truth.
+Proceed only when everything is `[PASS]`.
 
 ### Step 2 · Create the Virtual Machine (first time only)
 
@@ -151,7 +189,18 @@ nohup python3 serve.py > server.out 2>&1 &
 ```
 
 The service binds only to Parallels' virtual adapters (`10.211.55.2` / `10.37.129.2`) and is
-**not exposed to your Wi-Fi or LAN**.
+**not exposed to your Wi-Fi or LAN**. For a port conflict, or to smoke-test the distribution
+path on a machine without Parallels, override the bindings:
+
+```bash
+PORT=8765 python3 serve.py                            # different port
+SERVE_HOSTS=127.0.0.1 PORT=8765 python3 serve.py      # local-only, for smoke tests
+curl -s http://127.0.0.1:8765/ping                    # expects ok
+```
+
+> If you change the port, set the same `PORT` for `install.sh` inside the VM
+> (`PORT=8765 bash /root/i.sh`), otherwise it still probes 8000. `check.sh` / `diagnose.sh`
+> behave the same way.
 
 ### Step 4 · Boot Into the Live Environment
 

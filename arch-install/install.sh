@@ -3,11 +3,41 @@
 # Arch Linux ARM 自动安装脚本
 # 目标：Parallels Desktop on Apple Silicon (ARM64 / UEFI)
 # 用法：在 Archboot live 环境的 root shell 中执行本脚本
+#   bash install.sh          # 开始安装
+#   bash install.sh --help   # 打印本帮助并退出
 #
-# 配置来源（后者覆盖前者）：
+# 本脚本不接受位置参数。配置来源（后者覆盖前者）：
 #   1. 本脚本内的默认值
 #   2. /root/install.conf（若存在）—— 模板见 install.conf.example
+#   3. 环境变量 PORT（宿主机分发服务端口，默认 8000）
 # ============================================================
+
+# ---------- 参数校验 ----------
+# 必须早于一切破坏性动作（后面的 dd / mkfs），也早于 source install.conf：
+# 未识别的参数若顺着流程走下去，会直接开始分区格式化。
+usage() {
+    if [ -r "$0" ]; then
+        # 帮助文本取自文件头注释，遇首个非注释行即停；
+        # 按行号切片会在文件头增删一行时把代码漏进帮助里。
+        awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+    else
+        # 经 `curl | bash` 执行时 $0 不是脚本文件，退回最小说明
+        echo "用法: bash install.sh"
+        echo "本脚本不接受位置参数；配置来源见 install.conf.example"
+    fi
+}
+case "${1:-}" in
+    "") ;;
+    -h|--help)
+        usage
+        exit 2
+        ;;
+    *)
+        echo "[arch][FATAL] 未知参数: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
 
 # ---------- 默认配置 ----------
 NEW_HOSTNAME="arch-vm"          # 主机名
@@ -54,10 +84,12 @@ case "$NEW_DESKTOP" in
     *)     DM=""        ;;
 esac
 
+# 分发服务端口：宿主机上 serve.py 用了非默认端口时，这里需同步设置 PORT
+PORT="${PORT:-8000}"
 # 自动探测宿主机在 Parallels 虚拟网段中的地址（Shared / Host-Only 任一）
 HOST_IP=""
 for ip in 10.211.55.2 10.37.129.2; do
-    if curl -s -m 3 "http://$ip:8000/ping" 2>/dev/null | grep -q "ok"; then
+    if curl -s -m 3 "http://$ip:$PORT/ping" 2>/dev/null | grep -q "ok"; then
         HOST_IP="$ip"
         break
     fi
@@ -66,9 +98,9 @@ if [ -z "$HOST_IP" ]; then
     HOST_IP="10.211.55.2"
     echo "[arch][WARN] 未探测到宿主机（两个网段均无响应），日志回传可能不可用"
 else
-    echo "[arch] host detected at $HOST_IP"
+    echo "[arch] host detected at $HOST_IP:$PORT"
 fi
-HOST_URL="http://$HOST_IP:8000"
+HOST_URL="http://$HOST_IP:$PORT"
 
 # ---------- 结构化日志核心 ----------
 # 消息文本原样保留（文档与验收以 "[15] ALL DONE" 等字面量为准），
@@ -449,7 +481,7 @@ chmod 600 /mnt/root/.install-vars
 # 第二份定义，改一份漏一份，正是本仓库反复踩过的「同一逻辑两处实现」问题。
 {
     printf '#!/bin/bash\nset -o pipefail\n'
-    printf 'HOST_URL=$(cat /root/.host_url 2>/dev/null || echo "http://%s:8000")\n' "$HOST_IP"
+    printf 'HOST_URL=$(cat /root/.host_url 2>/dev/null || echo "http://%s:%s")\n' "$HOST_IP" "$PORT"
     printf 'RUN_ID=%s\nLOG_STAGE=chroot\nLOG_SEQ=0\nLOG_LOST=0\nLOG_T0=%s\nLOG_LOCAL=%s\nLOG_LAST=\n' \
         "'$RUN_ID'" "'$(date +%s)'" "'/root/install-$RUN_ID-chroot.log'"
     declare -f r

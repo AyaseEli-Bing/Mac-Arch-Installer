@@ -150,7 +150,8 @@ cd arch-install
 bash check.sh
 ```
 
-分 4 组检查：宿主机工具、安装介质、虚拟机状态、分发服务。
+分 5 组检查：宿主机工具、宿主机资源水位、安装介质、虚拟机状态、分发服务。
+检查项总数随环境状态浮动（如 ISO 哈希校验只在传入 `EXPECT_SHA` 时执行），以实际输出为准。
 全部 `[PASS]` 后再继续——各项的检查内容、结果含义与失败处理，
 见 **[自检功能使用教程.md](自检功能使用教程.md)**。
 
@@ -193,6 +194,16 @@ nohup python3 serve.py > server.out 2>&1 &
 ```
 
 服务只绑定 Parallels 的虚拟网卡（`10.211.55.2` / `10.37.129.2`），**不暴露到你的 WiFi 或局域网**。
+端口冲突、或想在没有 Parallels 的机器上验证分发链路时，用环境变量覆盖：
+
+```bash
+PORT=8765 python3 serve.py                            # 换端口
+SERVE_HOSTS=127.0.0.1 PORT=8765 python3 serve.py      # 只绑本机，便于本地冒烟
+curl -s http://127.0.0.1:8765/ping                    # 期望输出 ok
+```
+
+> 换端口后，虚拟机内的 `install.sh` 也要设同一个 `PORT`（`PORT=8765 bash /root/i.sh`），
+> 否则它仍按 8000 探测宿主机；`check.sh` / `diagnose.sh` 同理。
 
 ### 步骤 4 · 引导进入 live 环境
 

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """临时服务：向 Archboot live 环境分发安装脚本，并接收其回传的安装日志。
-仅绑定 Parallels Host-Only 网段地址 10.37.129.2（虚拟机所在网段），不暴露到其他网络。
+
+默认只监听 Parallels 的两张虚拟网卡（Shared 10.211.55.2 / Host-Only 10.37.129.2），
+不暴露到其他网络。可用环境变量覆盖：
+    SERVE_HOSTS=127.0.0.1   # 逗号分隔的绑定地址（本地冒烟测试用）
+    PORT=8765               # 端口冲突或本地测试时改端口
+在非 Parallels 机器上给 SERVE_HOSTS 一个本机地址即可启动，便于离线验证分发链路。
 """
 import http.server
 import socketserver
@@ -12,9 +17,30 @@ import datetime
 BASE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(BASE, "install.sh")
 LOGFILE = os.path.join(BASE, "log.txt")
-# 同时监听 Parallels 的两张虚拟网卡：Shared(10.211.55.2) 与 Host-Only(10.37.129.2)
-BIND_HOSTS = ["10.211.55.2", "10.37.129.2"]
-BIND_PORT = 8000
+DEFAULT_HOSTS = "10.211.55.2,10.37.129.2"   # Parallels Shared / Host-Only 虚拟网卡
+
+
+def _env_hosts():
+    raw = os.environ.get("SERVE_HOSTS", DEFAULT_HOSTS)
+    hosts = [h.strip() for h in raw.split(",") if h.strip()]
+    if not hosts:
+        raise SystemExit("SERVE_HOSTS 为空：请给出至少一个绑定地址，例如 SERVE_HOSTS=127.0.0.1")
+    return hosts
+
+
+def _env_port():
+    raw = os.environ.get("PORT", "8000")
+    try:
+        port = int(raw)
+    except ValueError:
+        raise SystemExit("PORT 必须是整数（当前为 %r），例如 PORT=8765 python3 serve.py" % raw)
+    if not 1 <= port <= 65535:
+        raise SystemExit("PORT 超出 1-65535 范围（当前为 %d）" % port)
+    return port
+
+
+BIND_HOSTS = _env_hosts()
+BIND_PORT = _env_port()
 RESET_FILE = os.path.join(BASE, "reset-password.sh")
 KEY_FILE = os.path.join(BASE, "sshkey.pub")
 MAX_BODY = 1_048_576      # 1 MB：日志回传远小于此，超出即视为异常请求
@@ -128,6 +154,7 @@ if __name__ == "__main__":
         threads.append(t)
         print("listening on %s:%d" % (host, BIND_PORT), flush=True)
     if not threads:
-        raise SystemExit("no listener could be started")
+        raise SystemExit("no listener could be started（检查 SERVE_HOSTS=%s 是否为本机拥有的地址）"
+                         % ",".join(BIND_HOSTS))
     for t in threads:
         t.join()

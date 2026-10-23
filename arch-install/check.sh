@@ -6,6 +6,8 @@
 #   bash check.sh                      # 使用默认配置
 #   VM="我的虚拟机" bash check.sh       # 指定虚拟机名称
 #   PORT=8000 bash check.sh            # 指定分发服务端口
+#   ISO=/path/to/archboot.iso bash check.sh   # 指定引导镜像（默认在 ~/Downloads 里找最新的）
+#   PRL=/path/to/prlctl bash check.sh  # 指定 prlctl 路径
 #   EXPECT_SHA=<sha256> bash check.sh  # 启用 ISO 哈希校验
 #
 # 退出码 = 未通过项数量（0 表示环境就绪，可用于脚本集成）
@@ -156,7 +158,7 @@ echo "[5/5] 分发服务"
 # 避免把「探测工具缺失」误判成「端口未监听」
 if command -v lsof >/dev/null 2>&1; then
     BOUND=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | grep -c LISTEN)
-elif nc -z -G 1 127.0.0.1 "$PORT" >/dev/null 2>&1; then
+elif command -v nc >/dev/null 2>&1 && nc -z -G 1 127.0.0.1 "$PORT" >/dev/null 2>&1; then
     BOUND=1
 else
     BOUND=0
